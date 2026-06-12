@@ -35,21 +35,45 @@ export function QuickLogForm({ targets }: { targets: LogTarget[] }) {
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
 
-  const [partnerId, setPartnerId] = useState<number>(targets[0]?.id ?? 0);
+  const [partnerIds, setPartnerIds] = useState<number[]>(
+    targets.length === 1 ? [targets[0].id] : []
+  );
   const [type, setType] = useState<string>("Visit");
   const [attendees, setAttendees] = useState<number[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
   const [customTopic, setCustomTopic] = useState("");
 
-  const partner = targets.find((t) => t.id === partnerId);
+  const selectedPartners = targets.filter((t) => partnerIds.includes(t.id));
+  const attendeeOptions = selectedPartners.flatMap((t) =>
+    t.people.map((p) => ({
+      ...p,
+      label:
+        selectedPartners.length > 1
+          ? `${p.name} (${t.name})`
+          : `${p.name} (${p.role})`,
+    }))
+  );
 
   const toggle = <T,>(list: T[], value: T): T[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
+  function togglePartner(id: number) {
+    const next = toggle(partnerIds, id);
+    setPartnerIds(next);
+    // Drop attendees that no longer belong to a selected partner.
+    const validPeople = new Set(
+      targets
+        .filter((t) => next.includes(t.id))
+        .flatMap((t) => t.people.map((p) => p.id))
+    );
+    setAttendees((current) => current.filter((id) => validPeople.has(id)));
+  }
+
   // Submit via onSubmit rather than form action: React 19 auto-resets the
-  // form after an action, which desyncs the controlled partner select.
+  // form after an action, which desyncs controlled inputs.
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (partnerIds.length === 0) return;
     setSaved(false);
     const formData = new FormData(event.currentTarget);
     formData.set(
@@ -80,28 +104,29 @@ export function QuickLogForm({ targets }: { targets: LogTarget[] }) {
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-5">
-      <input type="hidden" name="partner_id" value={partnerId} />
       <input type="hidden" name="type" value={type} />
+      {partnerIds.map((id) => (
+        <input key={id} type="hidden" name="partner_id" value={id} />
+      ))}
       {attendees.map((id) => (
         <input key={id} type="hidden" name="attendee" value={id} />
       ))}
 
-      <Field label="Partner">
-        <select
-          value={partnerId}
-          onChange={(e) => {
-            setPartnerId(Number(e.target.value));
-            setAttendees([]);
-          }}
-          className={`${inputCls} py-2.5 text-base`}
-        >
+      <div>
+        <span className={labelCls}>
+          Partner(s) — select several for joint sessions
+        </span>
+        <div className="flex flex-wrap gap-2">
           {targets.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
+            <Chip
+              key={t.id}
+              label={t.name}
+              selected={partnerIds.includes(t.id)}
+              onToggle={() => togglePartner(t.id)}
+            />
           ))}
-        </select>
-      </Field>
+        </div>
+      </div>
 
       <div>
         <span className={labelCls}>What was it?</span>
@@ -119,17 +144,21 @@ export function QuickLogForm({ targets }: { targets: LogTarget[] }) {
 
       <div>
         <span className={labelCls}>
-          Who attended? {partner && partner.people.length === 0 && (
+          Who attended?{" "}
+          {partnerIds.length === 0 && (
+            <span className="text-slate-400">(pick a partner first)</span>
+          )}
+          {partnerIds.length > 0 && attendeeOptions.length === 0 && (
             <span className="text-slate-400">
-              (no active people for this partner yet)
+              (no active people for the selected partner{partnerIds.length > 1 ? "s" : ""})
             </span>
           )}
         </span>
         <div className="flex flex-wrap gap-2">
-          {partner?.people.map((p) => (
+          {attendeeOptions.map((p) => (
             <Chip
               key={p.id}
-              label={`${p.name} (${p.role})`}
+              label={p.label}
               selected={attendees.includes(p.id)}
               onToggle={() => setAttendees(toggle(attendees, p.id))}
             />
@@ -169,7 +198,7 @@ export function QuickLogForm({ targets }: { targets: LogTarget[] }) {
         <Field label="One-liner">
           <input
             name="summary"
-            placeholder="e.g. Lunch at their office, talked H2 pipeline"
+            placeholder="e.g. Joint SSE training for three partners"
             className={`${inputCls} py-2.5 text-base`}
           />
         </Field>
@@ -187,7 +216,7 @@ export function QuickLogForm({ targets }: { targets: LogTarget[] }) {
       <div className="flex items-center gap-3">
         <button
           type="submit"
-          disabled={isPending}
+          disabled={isPending || partnerIds.length === 0}
           className={`${btnCls} px-6 py-2.5 text-base disabled:opacity-50`}
         >
           {isPending ? "Saving…" : "Log it"}

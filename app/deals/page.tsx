@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createDeal, deleteDeal, updateDealStage } from "@/lib/actions";
 import { listDeals, listLogTargets } from "@/lib/data";
 import { formatMoney } from "@/lib/health";
@@ -27,8 +28,14 @@ export default function DealsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-xl font-bold">Partner deals</h1>
-        <span className="text-sm text-slate-500">
+        <span className="flex items-baseline gap-4 text-sm text-slate-500">
           {open.length} active · {formatMoney(wonValue)} won all-time
+          <Link
+            href="/deals/import"
+            className="font-medium text-sky-700 hover:underline"
+          >
+            Import from Salesforce →
+          </Link>
         </span>
       </div>
 

@@ -41,9 +41,21 @@ function migrate(db: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS offices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      region TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS people (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      office_id INTEGER REFERENCES offices(id) ON DELETE SET NULL,
       name TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'Sales',
       title TEXT NOT NULL DEFAULT '',
@@ -86,6 +98,12 @@ function migrate(db: Database.Database) {
       PRIMARY KEY (engagement_id, person_id)
     );
 
+    CREATE TABLE IF NOT EXISTS engagement_partners (
+      engagement_id INTEGER NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+      partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      PRIMARY KEY (engagement_id, partner_id)
+    );
+
     CREATE TABLE IF NOT EXISTS deals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
@@ -96,6 +114,7 @@ function migrate(db: Database.Database) {
       support_provided TEXT NOT NULL DEFAULT '',
       registered_date TEXT NOT NULL DEFAULT '',
       closed_date TEXT NOT NULL DEFAULT '',
+      salesforce_id TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -162,6 +181,8 @@ function migrate(db: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_attendees_person ON engagement_attendees(person_id);
+    CREATE INDEX IF NOT EXISTS idx_engagement_partners ON engagement_partners(partner_id);
+    CREATE INDEX IF NOT EXISTS idx_offices_partner ON offices(partner_id);
     CREATE INDEX IF NOT EXISTS idx_deals_partner ON deals(partner_id);
     CREATE INDEX IF NOT EXISTS idx_people_partner ON people(partner_id);
     CREATE INDEX IF NOT EXISTS idx_certs_person ON certifications(person_id);
@@ -174,19 +195,33 @@ function migrate(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_problems_partner ON problems(partner_id);
   `);
 
-  // Upgrade databases created before topics/details/attendees existed.
-  const engagementCols = db
-    .prepare("PRAGMA table_info(engagements)")
-    .all() as { name: string }[];
-  if (!engagementCols.some((c) => c.name === "topics")) {
+  // Upgrade databases created before later features existed.
+  const hasColumn = (table: string, column: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(
+      (c) => c.name === column
+    );
+  if (!hasColumn("engagements", "topics")) {
     db.exec("ALTER TABLE engagements ADD COLUMN topics TEXT NOT NULL DEFAULT ''");
   }
-  if (!engagementCols.some((c) => c.name === "details")) {
+  if (!hasColumn("engagements", "details")) {
     db.exec("ALTER TABLE engagements ADD COLUMN details TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn("people", "office_id")) {
+    db.exec(
+      "ALTER TABLE people ADD COLUMN office_id INTEGER REFERENCES offices(id) ON DELETE SET NULL"
+    );
+  }
+  if (!hasColumn("deals", "salesforce_id")) {
+    db.exec("ALTER TABLE deals ADD COLUMN salesforce_id TEXT NOT NULL DEFAULT ''");
   }
   db.exec(
     `INSERT OR IGNORE INTO engagement_attendees (engagement_id, person_id)
      SELECT id, person_id FROM engagements WHERE person_id IS NOT NULL`
+  );
+  // Engagements used to belong to exactly one partner; mirror into the join table.
+  db.exec(
+    `INSERT OR IGNORE INTO engagement_partners (engagement_id, partner_id)
+     SELECT id, partner_id FROM engagements`
   );
 
   const tierCount = db.prepare("SELECT COUNT(*) AS c FROM tiers").get() as {

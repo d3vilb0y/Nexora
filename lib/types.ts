@@ -19,9 +19,21 @@ export type Partner = {
   updated_at: string;
 };
 
+export type Office = {
+  id: number;
+  partner_id: number;
+  name: string;
+  region: string;
+  address: string;
+  phone: string;
+  notes: string;
+  created_at: string;
+};
+
 export type Person = {
   id: number;
   partner_id: number;
+  office_id: number | null;
   name: string;
   role: string;
   title: string;
@@ -68,6 +80,7 @@ export type Deal = {
   support_provided: string;
   registered_date: string;
   closed_date: string;
+  salesforce_id: string;
   notes: string;
   created_at: string;
 };

@@ -29,6 +29,16 @@ export default function LogPage() {
                   </span>
                   <Badge value={e.type} />
                   <PartnerLink id={e.partner_id} name={e.partner_name} />
+                  {(() => {
+                    const co = (e.partner_names ?? "")
+                      .split(", ")
+                      .filter((n) => n && n !== e.partner_name);
+                    return co.length > 0 ? (
+                      <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
+                        joint with {co.join(", ")}
+                      </span>
+                    ) : null;
+                  })()}
                   {e.attendees && (
                     <span className="text-slate-500">with {e.attendees}</span>
                   )}

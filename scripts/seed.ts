@@ -12,18 +12,23 @@ const iso = (daysFromNow: number) =>
 db.exec(`
   DELETE FROM problems; DELETE FROM needs; DELETE FROM competitors;
   DELETE FROM business_goals; DELETE FROM licenses; DELETE FROM mdf_entries;
-  DELETE FROM deals; DELETE FROM engagement_attendees; DELETE FROM engagements;
-  DELETE FROM certifications; DELETE FROM people; DELETE FROM partners;
+  DELETE FROM deals; DELETE FROM engagement_partners; DELETE FROM engagement_attendees;
+  DELETE FROM engagements; DELETE FROM certifications; DELETE FROM people;
+  DELETE FROM offices; DELETE FROM partners;
 `);
 
 const addPartner = db.prepare(
   `INSERT INTO partners (name, tier, status, website, region, annual_revenue, notes)
    VALUES (?, ?, ?, ?, ?, ?, ?)`
 );
+const addOffice = db.prepare(
+  `INSERT INTO offices (partner_id, name, region, address) VALUES (?, ?, ?, ?)`
+);
 const addPerson = db.prepare(
   `INSERT INTO people (partner_id, name, role, title, email, phone, linkedin_url, status, departed_at, departed_to, notes)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
+const setOffice = db.prepare(`UPDATE people SET office_id = ? WHERE id = ?`);
 const addCert = db.prepare(
   `INSERT INTO certifications (person_id, name, level, issued_date, expiry_date)
    VALUES (?, ?, ?, ?, ?)`
@@ -34,8 +39,11 @@ const addEngagementStmt = db.prepare(
 const addAttendee = db.prepare(
   `INSERT INTO engagement_attendees (engagement_id, person_id) VALUES (?, ?)`
 );
+const addEngagementPartner = db.prepare(
+  `INSERT INTO engagement_partners (engagement_id, partner_id) VALUES (?, ?)`
+);
 function addEngagement(
-  partnerId: number,
+  partnerIds: number | number[],
   attendees: number[],
   type: string,
   date: string,
@@ -43,15 +51,17 @@ function addEngagement(
   topics = "",
   details = ""
 ) {
+  const ids = Array.isArray(partnerIds) ? partnerIds : [partnerIds];
   const id = Number(
-    addEngagementStmt.run(partnerId, type, date, summary, topics, details)
+    addEngagementStmt.run(ids[0], type, date, summary, topics, details)
       .lastInsertRowid
   );
+  for (const pid of ids) addEngagementPartner.run(id, pid);
   for (const personId of attendees) addAttendee.run(id, personId);
 }
 const addDeal = db.prepare(
-  `INSERT INTO deals (partner_id, customer, title, value, stage, support_provided, registered_date, closed_date)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO deals (partner_id, customer, title, value, stage, support_provided, registered_date, closed_date, salesforce_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const addMdf = db.prepare(
   `INSERT INTO mdf_entries (partner_id, entry_date, kind, amount, description) VALUES (?, ?, ?, ?, ?)`
@@ -85,6 +95,12 @@ const northwind = Number(
     "Largest partner in the region, strong technical bench."
   ).lastInsertRowid
 );
+const nwStockholm = Number(
+  addOffice.run(northwind, "Stockholm HQ", "Sweden", "Vasagatan 12, Stockholm").lastInsertRowid
+);
+const nwMalmo = Number(
+  addOffice.run(northwind, "Malmö office", "Sweden South", "Stortorget 3, Malmö").lastInsertRowid
+);
 const anna = Number(
   addPerson.run(northwind, "Anna Larsson", "Technical", "Lead Security Engineer",
     "anna@northwindsecure.example", "+46 70 123 4567",
@@ -106,6 +122,9 @@ addPerson.run(northwind, "David Holm", "Technical", "Senior Engineer",
   "", "", "https://linkedin.com/in/david-holm-example",
   "Departed", iso(-21), "Cloudbreak Consulting", "Took two cert holders' knowledge with him."
 );
+setOffice.run(nwStockholm, anna);
+setOffice.run(nwStockholm, bjorn);
+setOffice.run(nwMalmo, cecilia);
 addCert.run(anna, "ZIA", "Professional", iso(-305), iso(60));
 addCert.run(anna, "ZPA", "Professional", iso(-200), iso(165));
 addCert.run(bjorn, "Sales Foundation", "Associate", iso(-100), iso(265));
@@ -183,12 +202,19 @@ addNeed.run(meridian, "Re-engagement plan", "No touchpoint in three months.", "M
 addProblem.run(meridian, "Unresponsive to outreach", "Risk of partner churn.", "Critical", "Open");
 addCompetitor.run(meridian, "Zscaler", "Also resells us via a distributor — and pitches Palo Alto");
 
+// Joint training across all three partners
+addEngagement([northwind, apex, meridian], [anna, cecilia, markus, piet],
+  "Enablement session", iso(-3),
+  "Regional partner training day — SSE deep dive for three partners.",
+  "Enablement, Certifications, Roadmap",
+  "Strong turnout; Apex asked for a follow-up cert bootcamp in Q3.");
+
 // Deals partners brought us into
 addDeal.run(northwind, "ScandiRetail AB", "SSE rollout, 1200 users", 180000,
-  "In progress", "Joint demo + PoC support", iso(-25), "");
+  "In progress", "Joint demo + PoC support", iso(-25), "", "006Aa0000012AbCdEF");
 addDeal.run(northwind, "Fjord Logistics", "ZPA for contractors", 60000,
-  "Won", "Pricing approval, architecture review", iso(-120), iso(-10));
+  "Won", "Pricing approval, architecture review", iso(-120), iso(-10), "");
 addDeal.run(apex, "Bayern Manufacturing", "Zero trust pilot", 45000,
-  "Registered", "Requested SE support for PoC", iso(-7), "");
+  "Registered", "Requested SE support for PoC", iso(-7), "", "");
 
 console.log("Seeded demo data: 3 partners, 8 people, certs, engagements, deals, MDF, licenses, goals.");

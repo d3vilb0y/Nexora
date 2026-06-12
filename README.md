@@ -9,8 +9,12 @@ with a health score and tier gap analysis on top.
 
 - **Partners** — tier (Authorized / Silver / Gold), status, region, revenue, notes.
 - **Personnel** — sales & technical contacts per partner with LinkedIn profiles,
-  plus **churn tracking**: mark a person departed, record where they went, and
-  see how that affects the partner's tier.
+  shown as compact expandable rows, plus **churn tracking**: mark a person
+  departed, record where they went, and see how that affects the partner's tier.
+- **Offices/regions** — partners can have several sales offices; people are
+  assignable to one.
+- **Contact export** — CSV download or copy-paste email list, filtered by
+  role (all/sales/technical/…) across any selection of partners.
 - **Certifications with expiry alerts** — "Anna's ZIA cert expires in 60 days"
   reminders on the dashboard (90-day window), since tier status often depends
   on keeping N people certified. Certs held by departed people stop counting.
@@ -18,8 +22,14 @@ with a health score and tier gap analysis on top.
   editable on the Tiers page; each partner page shows what's missing to
   maintain the current tier or advance to the next one, and the dashboard
   flags tiers at risk.
-- **Engagement history** — QBRs, enablement sessions, calls per partner and
-  person; partners with no touchpoint in 60+ days surface as "gone quiet".
+- **Engagement history** — quick mobile-friendly logger (visits, lunches,
+  QBRs…) with attendees and topic chips; an engagement can span several
+  partners at once (e.g. a joint training); partners with no touchpoint in
+  60+ days surface as "gone quiet".
+- **Deals** — register deals partners bring us into, with our support noted
+  and a stage workflow; **Salesforce import** via report CSV upload or direct
+  REST API sync (`SF_INSTANCE_URL` + `SF_ACCESS_TOKEN`), deduped on
+  opportunity ID.
 - **MDF / co-op funds** — allocation and usage ledger with running balance.
 - **NFR / lab licenses** — demo tenants and gear per partner, with expiry alerts.
 - **Joint business plans** — yearly goals with progress bars.

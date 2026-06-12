@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "./db";
+import {
+  fetchSalesforceDeals,
+  importDeals,
+  parseSalesforceCsv,
+  type ImportSummary,
+} from "./deal-import";
 
 function str(form: FormData, key: string): string {
   return (form.get(key) as string | null)?.trim() ?? "";
@@ -77,17 +83,44 @@ export async function deletePartner(form: FormData) {
   redirect("/partners");
 }
 
+// --- Offices ---
+
+export async function createOffice(form: FormData) {
+  const partnerId = num(form, "partner_id");
+  getDb()
+    .prepare(
+      `INSERT INTO offices (partner_id, name, region, address, phone, notes)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      partnerId,
+      reqStr(form, "name"),
+      str(form, "region"),
+      str(form, "address"),
+      str(form, "phone"),
+      str(form, "notes")
+    );
+  revalidatePartner(partnerId);
+}
+
+export async function deleteOffice(form: FormData) {
+  getDb().prepare("DELETE FROM offices WHERE id = ?").run(num(form, "id"));
+  revalidatePartner(num(form, "partner_id"));
+}
+
 // --- People ---
 
 export async function createPerson(form: FormData) {
   const partnerId = num(form, "partner_id");
+  const officeId = num(form, "office_id");
   getDb()
     .prepare(
-      `INSERT INTO people (partner_id, name, role, title, email, phone, linkedin_url, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO people (partner_id, office_id, name, role, title, email, phone, linkedin_url, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       partnerId,
+      officeId > 0 ? officeId : null,
       reqStr(form, "name"),
       str(form, "role") || "Sales",
       str(form, "title"),
@@ -97,6 +130,14 @@ export async function createPerson(form: FormData) {
       str(form, "notes")
     );
   revalidatePartner(partnerId);
+}
+
+export async function setPersonOffice(form: FormData) {
+  const officeId = num(form, "office_id");
+  getDb()
+    .prepare("UPDATE people SET office_id = ? WHERE id = ?")
+    .run(officeId > 0 ? officeId : null, num(form, "id"));
+  revalidatePartner(num(form, "partner_id"));
 }
 
 export async function markPersonDeparted(form: FormData) {
@@ -158,8 +199,11 @@ export async function deleteCertification(form: FormData) {
 // --- Engagements ---
 
 export async function createEngagement(form: FormData) {
-  const partnerId = num(form, "partner_id");
-  if (!partnerId) throw new Error("Pick a partner first");
+  const partnerIds = form
+    .getAll("partner_id")
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (partnerIds.length === 0) throw new Error("Pick at least one partner");
   const attendeeIds = form
     .getAll("attendee")
     .map(Number)
@@ -167,19 +211,25 @@ export async function createEngagement(form: FormData) {
 
   const db = getDb();
   db.transaction(() => {
+    // partner_id keeps the first partner as the "primary" for legacy queries;
+    // engagement_partners holds the full set.
     const result = db
       .prepare(
         `INSERT INTO engagements (partner_id, type, date, summary, topics, details)
          VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
-        partnerId,
+        partnerIds[0],
         str(form, "type") || "Meeting",
         str(form, "date") || new Date().toISOString().slice(0, 10),
         str(form, "summary"),
         str(form, "topics"),
         str(form, "details")
       );
+    const addPartner = db.prepare(
+      "INSERT OR IGNORE INTO engagement_partners (engagement_id, partner_id) VALUES (?, ?)"
+    );
+    for (const pid of partnerIds) addPartner.run(result.lastInsertRowid, pid);
     const addAttendee = db.prepare(
       "INSERT OR IGNORE INTO engagement_attendees (engagement_id, person_id) VALUES (?, ?)"
     );
@@ -187,7 +237,7 @@ export async function createEngagement(form: FormData) {
       addAttendee.run(result.lastInsertRowid, personId);
     }
   })();
-  revalidatePartner(partnerId);
+  for (const pid of partnerIds) revalidatePartner(pid);
 }
 
 export async function deleteEngagement(form: FormData) {
@@ -233,6 +283,45 @@ export async function updateDealStage(form: FormData) {
 export async function deleteDeal(form: FormData) {
   getDb().prepare("DELETE FROM deals WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
+}
+
+// --- Salesforce deal import ---
+
+function redirectWithSummary(summary: ImportSummary): never {
+  const params = new URLSearchParams({
+    imported: String(summary.imported),
+    updated: String(summary.updated),
+  });
+  if (summary.skipped.length > 0) {
+    params.set("skipped", summary.skipped.slice(0, 20).join("\n"));
+  }
+  revalidatePath("/deals");
+  revalidatePath("/");
+  redirect(`/deals/import?${params.toString()}`);
+}
+
+function redirectWithError(message: string): never {
+  redirect(`/deals/import?${new URLSearchParams({ error: message })}`);
+}
+
+export async function importDealsFromCsv(form: FormData) {
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    redirectWithError("No file uploaded.");
+  }
+  const { records, error } = parseSalesforceCsv(await file.text());
+  if (error) redirectWithError(error);
+  redirectWithSummary(importDeals(records));
+}
+
+export async function importDealsFromSalesforceApi() {
+  let summary: ImportSummary;
+  try {
+    summary = importDeals(await fetchSalesforceDeals());
+  } catch (err) {
+    redirectWithError(err instanceof Error ? err.message : "Salesforce sync failed.");
+  }
+  redirectWithSummary(summary);
 }
 
 // --- MDF ---

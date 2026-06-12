@@ -20,6 +20,7 @@ import {
   LicensesSection,
   MdfSection,
   NeedsSection,
+  OfficesSection,
   PeopleSection,
   ProblemsSection,
 } from "@/components/partner-sections";
@@ -141,6 +142,7 @@ export default async function PartnerPage({
         </Card>
       </div>
 
+      <OfficesSection detail={detail} />
       <PeopleSection detail={detail} />
       <EngagementsSection detail={detail} />
       <DealsSection detail={detail} />

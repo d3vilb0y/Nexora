@@ -9,6 +9,7 @@ import {
   createLicense,
   createMdfEntry,
   createNeed,
+  createOffice,
   createPerson,
   createProblem,
   deleteCertification,
@@ -19,10 +20,12 @@ import {
   deleteLicense,
   deleteMdfEntry,
   deleteNeed,
+  deleteOffice,
   deletePerson,
   deleteProblem,
   markPersonDeparted,
   reactivatePerson,
+  setPersonOffice,
   updateDealStage,
   updateGoalProgress,
   updateNeedStatus,
@@ -68,6 +71,24 @@ function AddForm({
   );
 }
 
+/** Borderless variant for use inside already-bordered containers. */
+function AddFormInline({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="min-w-0 grow">
+      <summary className="cursor-pointer text-xs font-medium text-sky-700">
+        {label}
+      </summary>
+      <div className="pt-3">{children}</div>
+    </details>
+  );
+}
+
 function HiddenIds({
   partnerId,
   id,
@@ -91,170 +112,262 @@ function DeleteButton({ label = "Delete" }: { label?: string }) {
   );
 }
 
+// --- Offices ---
+
+export function OfficesSection({ detail }: { detail: PartnerDetail }) {
+  const { partner, offices } = detail;
+  return (
+    <Card title="Offices / regions">
+      {offices.length === 0 ? (
+        <Empty>No separate offices — single-location partner.</Empty>
+      ) : (
+        <ul className="space-y-2">
+          {offices.map((o) => (
+            <li key={o.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium">{o.name}</span>
+              {o.region && <Badge value={o.region} />}
+              {o.address && <span className="text-slate-500">{o.address}</span>}
+              {o.phone && <span className="text-slate-400">{o.phone}</span>}
+              <span className="text-xs text-slate-400">
+                {o.people_count} active{" "}
+                {o.people_count === 1 ? "person" : "people"}
+              </span>
+              <form action={deleteOffice} className="ml-auto">
+                <HiddenIds partnerId={partner.id} id={o.id} />
+                <DeleteButton label="Remove" />
+              </form>
+            </li>
+          ))}
+        </ul>
+      )}
+      <AddForm label="Add office">
+        <form action={createOffice} className="grid gap-3 md:grid-cols-4">
+          <HiddenIds partnerId={partner.id} />
+          <Field label="Office name *">
+            <input
+              name="name"
+              required
+              className={inputCls}
+              placeholder="e.g. Stockholm HQ"
+            />
+          </Field>
+          <Field label="Region">
+            <input name="region" className={inputCls} placeholder="e.g. Nordics" />
+          </Field>
+          <Field label="Address">
+            <input name="address" className={inputCls} />
+          </Field>
+          <Field label="Phone">
+            <input name="phone" className={inputCls} />
+          </Field>
+          <div className="md:col-span-4">
+            <button type="submit" className={btnCls}>
+              Add office
+            </button>
+          </div>
+        </form>
+      </AddForm>
+    </Card>
+  );
+}
+
 // --- People & certifications ---
 
+function PersonRow({
+  detail,
+  person,
+}: {
+  detail: PartnerDetail;
+  person: PartnerDetail["people"][number];
+}) {
+  const { partner, offices } = detail;
+  const soonest = person.certifications
+    .filter((c) => c.expiry_date)
+    .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date))[0];
+
+  return (
+    <details
+      className={`group rounded-lg border ${person.status === "Departed" ? "border-rose-200 bg-rose-50/40" : "border-slate-200"}`}
+    >
+      <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
+        <span className="text-slate-400 transition-transform group-open:rotate-90">
+          ▸
+        </span>
+        <span className="font-semibold">{person.name}</span>
+        <Badge value={person.role} />
+        {person.office_name && (
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+            {person.office_name}
+          </span>
+        )}
+        {person.status === "Departed" && <Badge value="Departed" />}
+        <span className="ml-auto flex items-center gap-2 text-xs text-slate-400">
+          {person.certifications.length} cert
+          {person.certifications.length === 1 ? "" : "s"}
+          {soonest && person.status === "Active" && (
+            <CertExpiryBadge expiryDate={soonest.expiry_date} />
+          )}
+        </span>
+      </summary>
+
+      <div className="space-y-3 border-t border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+          {person.title && <span>{person.title}</span>}
+          {person.email && (
+            <a href={`mailto:${person.email}`} className="text-sky-700 hover:underline">
+              {person.email}
+            </a>
+          )}
+          {person.phone && <span>{person.phone}</span>}
+          {person.linkedin_url && (
+            <a
+              href={person.linkedin_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sky-700 hover:underline"
+            >
+              LinkedIn
+            </a>
+          )}
+          {person.status === "Departed" && (
+            <span className="text-rose-600">
+              left {person.departed_at || "?"}
+              {person.departed_to ? ` → ${person.departed_to}` : ""}
+            </span>
+          )}
+        </div>
+        {person.notes && <p className="text-sm text-slate-500">{person.notes}</p>}
+
+        {person.certifications.length === 0 ? (
+          <p className="text-xs text-slate-400">No certifications.</p>
+        ) : (
+          <ul className="space-y-1">
+            {person.certifications.map((cert) => (
+              <li key={cert.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-medium">{cert.name}</span>
+                {cert.level && <span className="text-slate-500">{cert.level}</span>}
+                <CertExpiryBadge expiryDate={cert.expiry_date} />
+                {cert.expiry_date && (
+                  <span className="text-xs text-slate-400">
+                    expires {cert.expiry_date}
+                  </span>
+                )}
+                {person.status === "Departed" && (
+                  <span className="text-xs text-rose-500">
+                    (not counted — departed)
+                  </span>
+                )}
+                <form action={deleteCertification} className="ml-auto">
+                  <HiddenIds partnerId={partner.id} id={cert.id} />
+                  <DeleteButton label="Remove" />
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex flex-wrap items-center gap-4 border-t border-slate-100 pt-2">
+          <AddFormInline label="Add certification">
+            <form action={createCertification} className="grid gap-3 md:grid-cols-4">
+              <HiddenIds partnerId={partner.id} />
+              <input type="hidden" name="person_id" value={person.id} />
+              <Field label="Certification *">
+                <input name="name" required className={inputCls} placeholder="e.g. ZIA" />
+              </Field>
+              <Field label="Level">
+                <input name="level" className={inputCls} placeholder="e.g. Professional" />
+              </Field>
+              <Field label="Issued">
+                <input type="date" name="issued_date" className={inputCls} />
+              </Field>
+              <Field label="Expires">
+                <input type="date" name="expiry_date" className={inputCls} />
+              </Field>
+              <div className="md:col-span-4">
+                <button type="submit" className={btnCls}>
+                  Add certification
+                </button>
+              </div>
+            </form>
+          </AddFormInline>
+          {offices.length > 0 && person.status === "Active" && (
+            <form action={setPersonOffice} className="flex items-center gap-1 text-xs">
+              <HiddenIds partnerId={partner.id} id={person.id} />
+              <select
+                name="office_id"
+                defaultValue={person.office_id ?? 0}
+                className="rounded-md border border-slate-300 px-1 py-0.5 text-xs"
+              >
+                <option value={0}>— no office —</option>
+                {offices.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className="text-sky-700 hover:underline">
+                Set office
+              </button>
+            </form>
+          )}
+          <span className="ml-auto flex items-center gap-2">
+            {person.status === "Active" ? (
+              <details className="relative">
+                <summary className="cursor-pointer text-xs text-slate-500 hover:text-rose-600">
+                  Mark departed
+                </summary>
+                <form
+                  action={markPersonDeparted}
+                  className="absolute right-0 z-10 mt-1 w-64 space-y-2 rounded-md border border-slate-200 bg-white p-3 shadow-lg"
+                >
+                  <HiddenIds partnerId={partner.id} id={person.id} />
+                  <Field label="Departure date">
+                    <input type="date" name="departed_at" className={inputCls} />
+                  </Field>
+                  <Field label="Went to (company)">
+                    <input
+                      name="departed_to"
+                      className={inputCls}
+                      placeholder="New employer"
+                    />
+                  </Field>
+                  <button type="submit" className={btnCls}>
+                    Confirm departure
+                  </button>
+                </form>
+              </details>
+            ) : (
+              <form action={reactivatePerson}>
+                <HiddenIds partnerId={partner.id} id={person.id} />
+                <button
+                  type="submit"
+                  className="text-xs text-slate-500 hover:text-emerald-600"
+                >
+                  Reactivate
+                </button>
+              </form>
+            )}
+            <form action={deletePerson}>
+              <HiddenIds partnerId={partner.id} id={person.id} />
+              <DeleteButton />
+            </form>
+          </span>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 export function PeopleSection({ detail }: { detail: PartnerDetail }) {
-  const { partner, people } = detail;
+  const { partner, people, offices } = detail;
   return (
     <Card title="Personnel & certifications">
       {people.length === 0 ? (
         <Empty>No people tracked yet.</Empty>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {people.map((person) => (
-            <div
-              key={person.id}
-              className={`rounded-lg border p-3 ${person.status === "Departed" ? "border-rose-200 bg-rose-50/40" : "border-slate-200"}`}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold">{person.name}</span>
-                <Badge value={person.role} />
-                <Badge value={person.status} />
-                {person.title && (
-                  <span className="text-sm text-slate-500">{person.title}</span>
-                )}
-                {person.linkedin_url && (
-                  <a
-                    href={person.linkedin_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm text-sky-700 hover:underline"
-                  >
-                    LinkedIn
-                  </a>
-                )}
-                <span className="ml-auto flex items-center gap-2">
-                  {person.status === "Active" ? (
-                    <details className="relative">
-                      <summary className="cursor-pointer text-xs text-slate-500 hover:text-rose-600">
-                        Mark departed
-                      </summary>
-                      <form
-                        action={markPersonDeparted}
-                        className="absolute right-0 z-10 mt-1 w-64 space-y-2 rounded-md border border-slate-200 bg-white p-3 shadow-lg"
-                      >
-                        <HiddenIds partnerId={partner.id} id={person.id} />
-                        <Field label="Departure date">
-                          <input
-                            type="date"
-                            name="departed_at"
-                            className={inputCls}
-                          />
-                        </Field>
-                        <Field label="Went to (company)">
-                          <input
-                            name="departed_to"
-                            className={inputCls}
-                            placeholder="New employer"
-                          />
-                        </Field>
-                        <button type="submit" className={btnCls}>
-                          Confirm departure
-                        </button>
-                      </form>
-                    </details>
-                  ) : (
-                    <form action={reactivatePerson}>
-                      <HiddenIds partnerId={partner.id} id={person.id} />
-                      <button
-                        type="submit"
-                        className="text-xs text-slate-500 hover:text-emerald-600"
-                      >
-                        Reactivate
-                      </button>
-                    </form>
-                  )}
-                  <form action={deletePerson}>
-                    <HiddenIds partnerId={partner.id} id={person.id} />
-                    <DeleteButton />
-                  </form>
-                </span>
-              </div>
-              <div className="mt-1 text-sm text-slate-500">
-                {[person.email, person.phone].filter(Boolean).join(" · ") ||
-                  "No contact details"}
-                {person.status === "Departed" && (
-                  <span className="text-rose-600">
-                    {" "}
-                    — left {person.departed_at || "?"}
-                    {person.departed_to ? ` → ${person.departed_to}` : ""}
-                  </span>
-                )}
-              </div>
-              {person.notes && (
-                <p className="mt-1 text-sm text-slate-500">{person.notes}</p>
-              )}
-
-              <div className="mt-2">
-                {person.certifications.length === 0 ? (
-                  <p className="text-xs text-slate-400">No certifications.</p>
-                ) : (
-                  <ul className="space-y-1">
-                    {person.certifications.map((cert) => (
-                      <li
-                        key={cert.id}
-                        className="flex flex-wrap items-center gap-2 text-sm"
-                      >
-                        <span className="font-medium">{cert.name}</span>
-                        {cert.level && (
-                          <span className="text-slate-500">{cert.level}</span>
-                        )}
-                        <CertExpiryBadge expiryDate={cert.expiry_date} />
-                        {cert.expiry_date && (
-                          <span className="text-xs text-slate-400">
-                            expires {cert.expiry_date}
-                          </span>
-                        )}
-                        {person.status === "Departed" && (
-                          <span className="text-xs text-rose-500">
-                            (not counted — departed)
-                          </span>
-                        )}
-                        <form action={deleteCertification} className="ml-auto">
-                          <HiddenIds partnerId={partner.id} id={cert.id} />
-                          <DeleteButton label="Remove" />
-                        </form>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <AddForm label="Add certification">
-                  <form
-                    action={createCertification}
-                    className="grid gap-3 md:grid-cols-4"
-                  >
-                    <HiddenIds partnerId={partner.id} />
-                    <input type="hidden" name="person_id" value={person.id} />
-                    <Field label="Certification *">
-                      <input
-                        name="name"
-                        required
-                        className={inputCls}
-                        placeholder="e.g. ZIA"
-                      />
-                    </Field>
-                    <Field label="Level">
-                      <input
-                        name="level"
-                        className={inputCls}
-                        placeholder="e.g. Professional"
-                      />
-                    </Field>
-                    <Field label="Issued">
-                      <input type="date" name="issued_date" className={inputCls} />
-                    </Field>
-                    <Field label="Expires">
-                      <input type="date" name="expiry_date" className={inputCls} />
-                    </Field>
-                    <div className="md:col-span-4">
-                      <button type="submit" className={btnCls}>
-                        Add certification
-                      </button>
-                    </div>
-                  </form>
-                </AddForm>
-              </div>
-            </div>
+            <PersonRow key={person.id} detail={detail} person={person} />
           ))}
         </div>
       )}
@@ -269,6 +382,16 @@ export function PeopleSection({ detail }: { detail: PartnerDetail }) {
             <select name="role" className={inputCls}>
               {PERSON_ROLES.map((r) => (
                 <option key={r}>{r}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Office">
+            <select name="office_id" className={inputCls}>
+              <option value={0}>— no office —</option>
+              {offices.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
               ))}
             </select>
           </Field>
@@ -322,13 +445,22 @@ export function EngagementsSection({ detail }: { detail: PartnerDetail }) {
         <Empty>No touchpoints logged — this partner counts as quiet.</Empty>
       ) : (
         <ul className="space-y-3">
-          {engagements.map((e) => (
+          {engagements.map((e) => {
+            const coPartners = (e.partner_names ?? "")
+              .split(", ")
+              .filter((n) => n && n !== partner.name);
+            return (
             <li key={e.id} className="text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="whitespace-nowrap text-slate-400">
                   {e.date}
                 </span>
                 <Badge value={e.type} />
+                {coPartners.length > 0 && (
+                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
+                    joint with {coPartners.join(", ")}
+                  </span>
+                )}
                 {e.attendees && (
                   <span className="text-slate-500">with {e.attendees}</span>
                 )}
@@ -357,7 +489,8 @@ export function EngagementsSection({ detail }: { detail: PartnerDetail }) {
                 <p className="mt-1 pl-1 text-xs text-slate-400">{e.details}</p>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
       <AddForm label="Log touchpoint">
