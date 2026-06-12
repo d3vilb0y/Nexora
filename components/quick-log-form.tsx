@@ -46,15 +46,23 @@ export function QuickLogForm({ targets }: { targets: LogTarget[] }) {
   const toggle = <T,>(list: T[], value: T): T[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
-  function submit(formData: FormData) {
+  // Submit via onSubmit rather than form action: React 19 auto-resets the
+  // form after an action, which desyncs the controlled partner select.
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setSaved(false);
+    const formData = new FormData(event.currentTarget);
     formData.set(
       "topics",
       [...topics, customTopic.trim()].filter(Boolean).join(", ")
     );
     startTransition(async () => {
       await createEngagement(formData);
-      formRef.current?.reset();
+      const form = formRef.current;
+      if (form) {
+        (form.elements.namedItem("summary") as HTMLInputElement).value = "";
+        (form.elements.namedItem("details") as HTMLTextAreaElement).value = "";
+      }
       setAttendees([]);
       setTopics([]);
       setCustomTopic("");
@@ -71,7 +79,7 @@ export function QuickLogForm({ targets }: { targets: LogTarget[] }) {
   }
 
   return (
-    <form ref={formRef} action={submit} className="space-y-5">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-5">
       <input type="hidden" name="partner_id" value={partnerId} />
       <input type="hidden" name="type" value={type} />
       {attendees.map((id) => (
