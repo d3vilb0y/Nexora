@@ -1,7 +1,9 @@
+import Link from "next/link";
 import type { PartnerDetail } from "@/lib/data";
 import {
   createCertification,
   createCompetitor,
+  createDeal,
   createEngagement,
   createGoal,
   createLicense,
@@ -11,6 +13,7 @@ import {
   createProblem,
   deleteCertification,
   deleteCompetitor,
+  deleteDeal,
   deleteEngagement,
   deleteGoal,
   deleteLicense,
@@ -20,12 +23,14 @@ import {
   deleteProblem,
   markPersonDeparted,
   reactivatePerson,
+  updateDealStage,
   updateGoalProgress,
   updateNeedStatus,
   updateProblemStatus,
 } from "@/lib/actions";
 import { formatMoney } from "@/lib/health";
 import {
+  DEAL_STAGES,
   ENGAGEMENT_TYPES,
   LICENSE_KINDS,
   MDF_KINDS,
@@ -303,32 +308,60 @@ export function PeopleSection({ detail }: { detail: PartnerDetail }) {
 
 export function EngagementsSection({ detail }: { detail: PartnerDetail }) {
   const { partner, engagements, people } = detail;
+  const activePeople = people.filter((p) => p.status === "Active");
   return (
-    <Card title="Engagement history">
+    <Card
+      title="Engagement history"
+      action={
+        <Link href="/log" className="text-xs font-medium text-sky-700 hover:underline">
+          Quick log →
+        </Link>
+      }
+    >
       {engagements.length === 0 ? (
         <Empty>No touchpoints logged — this partner counts as quiet.</Empty>
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-3">
           {engagements.map((e) => (
-            <li key={e.id} className="flex items-baseline gap-2 text-sm">
-              <span className="whitespace-nowrap text-slate-400">{e.date}</span>
-              <Badge value={e.type} />
-              <span>
-                {e.summary || "—"}
-                {e.person_name && (
-                  <span className="text-slate-500"> (with {e.person_name})</span>
+            <li key={e.id} className="text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="whitespace-nowrap text-slate-400">
+                  {e.date}
+                </span>
+                <Badge value={e.type} />
+                {e.attendees && (
+                  <span className="text-slate-500">with {e.attendees}</span>
                 )}
-              </span>
-              <form action={deleteEngagement} className="ml-auto">
-                <HiddenIds partnerId={partner.id} id={e.id} />
-                <DeleteButton label="Remove" />
-              </form>
+                <form action={deleteEngagement} className="ml-auto">
+                  <HiddenIds partnerId={partner.id} id={e.id} />
+                  <DeleteButton label="Remove" />
+                </form>
+              </div>
+              {(e.summary || e.topics) && (
+                <div className="mt-1 flex flex-wrap items-center gap-2 pl-1">
+                  {e.topics &&
+                    e.topics.split(",").map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
+                      >
+                        {t.trim()}
+                      </span>
+                    ))}
+                  {e.summary && (
+                    <span className="text-slate-600">{e.summary}</span>
+                  )}
+                </div>
+              )}
+              {e.details && (
+                <p className="mt-1 pl-1 text-xs text-slate-400">{e.details}</p>
+              )}
             </li>
           ))}
         </ul>
       )}
       <AddForm label="Log touchpoint">
-        <form action={createEngagement} className="grid gap-3 md:grid-cols-4">
+        <form action={createEngagement} className="grid gap-3 md:grid-cols-3">
           <HiddenIds partnerId={partner.id} />
           <Field label="Type">
             <select name="type" className={inputCls}>
@@ -340,24 +373,146 @@ export function EngagementsSection({ detail }: { detail: PartnerDetail }) {
           <Field label="Date">
             <input type="date" name="date" className={inputCls} />
           </Field>
-          <Field label="With person">
-            <select name="person_id" className={inputCls}>
-              <option value="0">— partner level —</option>
-              {people
-                .filter((p) => p.status === "Active")
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-            </select>
+          <Field label="Topics (comma separated)">
+            <input
+              name="topics"
+              className={inputCls}
+              placeholder="Pipeline, Roadmap"
+            />
           </Field>
-          <Field label="Summary">
-            <input name="summary" className={inputCls} placeholder="What happened?" />
+          <div className="md:col-span-3">
+            <span className="mb-1 block text-xs font-medium text-slate-500">
+              Attendees
+            </span>
+            <div className="flex flex-wrap gap-3">
+              {activePeople.length === 0 && (
+                <span className="text-xs text-slate-400">
+                  No active people yet.
+                </span>
+              )}
+              {activePeople.map((p) => (
+                <label key={p.id} className="flex items-center gap-1 text-sm">
+                  <input type="checkbox" name="attendee" value={p.id} />
+                  {p.name}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="md:col-span-3">
+            <Field label="Summary">
+              <input
+                name="summary"
+                className={inputCls}
+                placeholder="What happened?"
+              />
+            </Field>
+          </div>
+          <div className="md:col-span-3">
+            <Field label="More details">
+              <textarea name="details" rows={2} className={inputCls} />
+            </Field>
+          </div>
+          <div>
+            <button type="submit" className={btnCls}>
+              Log touchpoint
+            </button>
+          </div>
+        </form>
+      </AddForm>
+    </Card>
+  );
+}
+
+// --- Deals ---
+
+export function DealsSection({ detail }: { detail: PartnerDetail }) {
+  const { partner, deals } = detail;
+  return (
+    <Card
+      title="Deals we're supporting"
+      action={
+        <Link
+          href="/deals"
+          className="text-xs font-medium text-sky-700 hover:underline"
+        >
+          All deals →
+        </Link>
+      }
+    >
+      {deals.length === 0 ? (
+        <Empty>No deals registered with this partner.</Empty>
+      ) : (
+        <ul className="space-y-2">
+          {deals.map((d) => (
+            <li key={d.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <Badge value={d.stage} />
+              <span className="font-medium">{d.customer}</span>
+              {d.title && <span className="text-slate-500">{d.title}</span>}
+              <span className="text-slate-500">{formatMoney(d.value)}</span>
+              {d.support_provided && (
+                <span className="text-xs text-slate-400">
+                  our help: {d.support_provided}
+                </span>
+              )}
+              <span className="ml-auto flex items-center gap-2">
+                <form
+                  action={updateDealStage}
+                  className="flex items-center gap-1"
+                >
+                  <HiddenIds partnerId={partner.id} id={d.id} />
+                  <select
+                    name="stage"
+                    defaultValue={d.stage}
+                    className="rounded-md border border-slate-300 px-1 py-0.5 text-xs"
+                  >
+                    {DEAL_STAGES.map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="text-xs text-sky-700 hover:underline"
+                  >
+                    Set
+                  </button>
+                </form>
+                <form action={deleteDeal}>
+                  <HiddenIds partnerId={partner.id} id={d.id} />
+                  <DeleteButton label="Remove" />
+                </form>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <AddForm label="Register deal">
+        <form action={createDeal} className="grid gap-3 md:grid-cols-4">
+          <HiddenIds partnerId={partner.id} />
+          <Field label="End customer *">
+            <input name="customer" required className={inputCls} />
+          </Field>
+          <Field label="Deal / opportunity">
+            <input name="title" className={inputCls} />
+          </Field>
+          <Field label="Value (USD)">
+            <input
+              type="number"
+              name="value"
+              min="0"
+              step="1000"
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Our support">
+            <input
+              name="support_provided"
+              className={inputCls}
+              placeholder="e.g. joint demo, PoC help"
+            />
           </Field>
           <div className="md:col-span-4">
             <button type="submit" className={btnCls}>
-              Log touchpoint
+              Register deal
             </button>
           </div>
         </form>

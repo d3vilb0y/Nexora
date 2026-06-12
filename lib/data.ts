@@ -11,6 +11,7 @@ import type {
   BusinessGoal,
   Certification,
   Competitor,
+  Deal,
   Engagement,
   License,
   MdfEntry,
@@ -125,10 +126,13 @@ export function listPartners(): PartnerSummary[] {
 
 export type PersonWithCerts = Person & { certifications: Certification[] };
 
+export type EngagementRow = Engagement & { attendees: string | null };
+
 export type PartnerDetail = {
   partner: PartnerSummary;
   people: PersonWithCerts[];
-  engagements: (Engagement & { person_name: string | null })[];
+  engagements: EngagementRow[];
+  deals: Deal[];
   mdfEntries: MdfEntry[];
   mdfBalance: number;
   licenses: License[];
@@ -138,6 +142,12 @@ export type PartnerDetail = {
   problems: Problem[];
   tiers: Tier[];
 };
+
+const ATTENDEES_SUBQUERY = `(
+  SELECT GROUP_CONCAT(p2.name, ', ') FROM engagement_attendees ea
+  JOIN people p2 ON p2.id = ea.person_id
+  WHERE ea.engagement_id = e.id
+) AS attendees`;
 
 export function getPartnerDetail(id: number): PartnerDetail | null {
   const db = getDb();
@@ -163,11 +173,10 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
 
   const engagements = db
     .prepare(
-      `SELECT e.*, p.name AS person_name FROM engagements e
-       LEFT JOIN people p ON p.id = e.person_id
+      `SELECT e.*, ${ATTENDEES_SUBQUERY} FROM engagements e
        WHERE e.partner_id = ? ORDER BY e.date DESC`
     )
-    .all(id) as (Engagement & { person_name: string | null })[];
+    .all(id) as EngagementRow[];
 
   const mdfEntries = db
     .prepare(
@@ -186,6 +195,12 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
       certifications: certsByPerson.filter((c) => c.person_id === person.id),
     })),
     engagements,
+    deals: db
+      .prepare(
+        `SELECT * FROM deals WHERE partner_id = ?
+         ORDER BY CASE WHEN stage IN ('Won','Lost') THEN 1 ELSE 0 END, registered_date DESC`
+      )
+      .all(id) as Deal[],
     mdfEntries,
     mdfBalance,
     licenses: db
@@ -228,7 +243,9 @@ export function listPeople(): PersonDirectoryRow[] {
     .prepare(
       `SELECT p.*, pa.name AS partner_name,
         (SELECT COUNT(*) FROM certifications c WHERE c.person_id = p.id) AS cert_count,
-        (SELECT MAX(e.date) FROM engagements e WHERE e.person_id = p.id) AS last_touch
+        (SELECT MAX(e.date) FROM engagements e
+         JOIN engagement_attendees ea ON ea.engagement_id = e.id
+         WHERE ea.person_id = p.id) AS last_touch
        FROM people p
        JOIN partners pa ON pa.id = p.partner_id
        ORDER BY p.status, p.name COLLATE NOCASE`
@@ -330,4 +347,67 @@ export function getDashboard(): DashboardData {
     recentDepartures,
     hotProblems,
   };
+}
+
+export type FeedEngagement = EngagementRow & { partner_name: string };
+
+export function listRecentEngagements(limit = 25): FeedEngagement[] {
+  return getDb()
+    .prepare(
+      `SELECT e.*, pa.name AS partner_name, ${ATTENDEES_SUBQUERY}
+       FROM engagements e
+       JOIN partners pa ON pa.id = e.partner_id
+       ORDER BY e.date DESC, e.id DESC LIMIT ?`
+    )
+    .all(limit) as FeedEngagement[];
+}
+
+export type DealRow = Deal & { partner_name: string };
+
+export function listDeals(): DealRow[] {
+  return getDb()
+    .prepare(
+      `SELECT d.*, pa.name AS partner_name FROM deals d
+       JOIN partners pa ON pa.id = d.partner_id
+       ORDER BY CASE WHEN d.stage IN ('Won','Lost') THEN 1 ELSE 0 END,
+                d.registered_date DESC, d.id DESC`
+    )
+    .all() as DealRow[];
+}
+
+export function listOpenDeals(): DealRow[] {
+  return getDb()
+    .prepare(
+      `SELECT d.*, pa.name AS partner_name FROM deals d
+       JOIN partners pa ON pa.id = d.partner_id
+       WHERE d.stage NOT IN ('Won','Lost')
+       ORDER BY d.value DESC`
+    )
+    .all() as DealRow[];
+}
+
+/** Partner names plus their active people, for the quick engagement logger. */
+export type LogTarget = {
+  id: number;
+  name: string;
+  people: { id: number; name: string; role: string }[];
+};
+
+export function listLogTargets(): LogTarget[] {
+  const db = getDb();
+  const partners = db
+    .prepare("SELECT id, name FROM partners ORDER BY name COLLATE NOCASE")
+    .all() as { id: number; name: string }[];
+  const people = db
+    .prepare(
+      `SELECT id, partner_id, name, role FROM people
+       WHERE status = 'Active' ORDER BY name COLLATE NOCASE`
+    )
+    .all() as { id: number; partner_id: number; name: string; role: string }[];
+  return partners.map((p) => ({
+    ...p,
+    people: people
+      .filter((person) => person.partner_id === p.id)
+      .map(({ id, name, role }) => ({ id, name, role })),
+  }));
 }

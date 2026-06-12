@@ -75,6 +75,28 @@ function migrate(db: Database.Database) {
       type TEXT NOT NULL DEFAULT 'Meeting',
       date TEXT NOT NULL,
       summary TEXT NOT NULL DEFAULT '',
+      topics TEXT NOT NULL DEFAULT '',
+      details TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS engagement_attendees (
+      engagement_id INTEGER NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+      person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+      PRIMARY KEY (engagement_id, person_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS deals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      customer TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      value REAL NOT NULL DEFAULT 0,
+      stage TEXT NOT NULL DEFAULT 'Registered',
+      support_provided TEXT NOT NULL DEFAULT '',
+      registered_date TEXT NOT NULL DEFAULT '',
+      closed_date TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -139,6 +161,8 @@ function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE INDEX IF NOT EXISTS idx_attendees_person ON engagement_attendees(person_id);
+    CREATE INDEX IF NOT EXISTS idx_deals_partner ON deals(partner_id);
     CREATE INDEX IF NOT EXISTS idx_people_partner ON people(partner_id);
     CREATE INDEX IF NOT EXISTS idx_certs_person ON certifications(person_id);
     CREATE INDEX IF NOT EXISTS idx_engagements_partner ON engagements(partner_id);
@@ -149,6 +173,21 @@ function migrate(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_needs_partner ON needs(partner_id);
     CREATE INDEX IF NOT EXISTS idx_problems_partner ON problems(partner_id);
   `);
+
+  // Upgrade databases created before topics/details/attendees existed.
+  const engagementCols = db
+    .prepare("PRAGMA table_info(engagements)")
+    .all() as { name: string }[];
+  if (!engagementCols.some((c) => c.name === "topics")) {
+    db.exec("ALTER TABLE engagements ADD COLUMN topics TEXT NOT NULL DEFAULT ''");
+  }
+  if (!engagementCols.some((c) => c.name === "details")) {
+    db.exec("ALTER TABLE engagements ADD COLUMN details TEXT NOT NULL DEFAULT ''");
+  }
+  db.exec(
+    `INSERT OR IGNORE INTO engagement_attendees (engagement_id, person_id)
+     SELECT id, person_id FROM engagements WHERE person_id IS NOT NULL`
+  );
 
   const tierCount = db.prepare("SELECT COUNT(*) AS c FROM tiers").get() as {
     c: number;

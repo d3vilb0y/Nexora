@@ -53,6 +53,22 @@ export type Engagement = {
   type: string;
   date: string;
   summary: string;
+  topics: string;
+  details: string;
+  created_at: string;
+};
+
+export type Deal = {
+  id: number;
+  partner_id: number;
+  customer: string;
+  title: string;
+  value: number;
+  stage: string;
+  support_provided: string;
+  registered_date: string;
+  closed_date: string;
+  notes: string;
   created_at: string;
 };
 
@@ -119,6 +135,8 @@ export type Problem = {
 
 export const PERSON_ROLES = ["Sales", "Technical", "Management", "Other"];
 export const ENGAGEMENT_TYPES = [
+  "Visit",
+  "Lunch/Dinner",
   "QBR",
   "Enablement session",
   "Meeting",
@@ -127,6 +145,18 @@ export const ENGAGEMENT_TYPES = [
   "Event",
   "Other",
 ];
+export const COMMON_TOPICS = [
+  "Pipeline",
+  "Roadmap",
+  "Certifications",
+  "Enablement",
+  "MDF/Marketing",
+  "Pricing",
+  "Support/Escalation",
+  "Deal support",
+  "Relationship",
+];
+export const DEAL_STAGES = ["Registered", "In progress", "Won", "Lost"];
 export const LICENSE_KINDS = ["NFR", "Lab", "Demo hardware", "Other"];
 export const MDF_KINDS = ["Allocation", "Usage"];
 export const PRIORITIES = ["Low", "Medium", "High"];

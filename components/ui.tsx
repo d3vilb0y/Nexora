@@ -28,6 +28,15 @@ const BADGE_COLORS: Record<string, string> = {
   Sales: "bg-violet-100 text-violet-800",
   Technical: "bg-cyan-100 text-cyan-800",
   Management: "bg-indigo-100 text-indigo-800",
+  // engagement types
+  Visit: "bg-teal-100 text-teal-800",
+  "Lunch/Dinner": "bg-pink-100 text-pink-800",
+  QBR: "bg-indigo-100 text-indigo-800",
+  "Enablement session": "bg-cyan-100 text-cyan-800",
+  // deal stages
+  Registered: "bg-sky-100 text-sky-800",
+  Won: "bg-emerald-100 text-emerald-800",
+  Lost: "bg-slate-200 text-slate-500",
 };
 
 export function Badge({ value }: { value: string }) {
@@ -96,7 +105,7 @@ export function Card({
         <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
         {action}
       </header>
-      <div className="p-4">{children}</div>
+      <div className="overflow-x-auto p-4">{children}</div>
     </section>
   );
 }

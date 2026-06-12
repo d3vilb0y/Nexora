@@ -25,6 +25,8 @@ function revalidatePartner(partnerId: number | string) {
   revalidatePath(`/partners/${partnerId}`);
   revalidatePath("/people");
   revalidatePath("/certifications");
+  revalidatePath("/log");
+  revalidatePath("/deals");
 }
 
 // --- Partners ---
@@ -157,24 +159,79 @@ export async function deleteCertification(form: FormData) {
 
 export async function createEngagement(form: FormData) {
   const partnerId = num(form, "partner_id");
-  const personId = num(form, "person_id");
-  getDb()
-    .prepare(
-      `INSERT INTO engagements (partner_id, person_id, type, date, summary)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(
-      partnerId,
-      personId > 0 ? personId : null,
-      str(form, "type") || "Meeting",
-      str(form, "date") || new Date().toISOString().slice(0, 10),
-      str(form, "summary")
+  if (!partnerId) throw new Error("Pick a partner first");
+  const attendeeIds = form
+    .getAll("attendee")
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
+
+  const db = getDb();
+  db.transaction(() => {
+    const result = db
+      .prepare(
+        `INSERT INTO engagements (partner_id, type, date, summary, topics, details)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        partnerId,
+        str(form, "type") || "Meeting",
+        str(form, "date") || new Date().toISOString().slice(0, 10),
+        str(form, "summary"),
+        str(form, "topics"),
+        str(form, "details")
+      );
+    const addAttendee = db.prepare(
+      "INSERT OR IGNORE INTO engagement_attendees (engagement_id, person_id) VALUES (?, ?)"
     );
+    for (const personId of attendeeIds) {
+      addAttendee.run(result.lastInsertRowid, personId);
+    }
+  })();
   revalidatePartner(partnerId);
 }
 
 export async function deleteEngagement(form: FormData) {
   getDb().prepare("DELETE FROM engagements WHERE id = ?").run(num(form, "id"));
+  revalidatePartner(num(form, "partner_id"));
+}
+
+// --- Deals ---
+
+export async function createDeal(form: FormData) {
+  const partnerId = num(form, "partner_id");
+  if (!partnerId) throw new Error("Pick a partner first");
+  getDb()
+    .prepare(
+      `INSERT INTO deals (partner_id, customer, title, value, stage, support_provided, registered_date, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      partnerId,
+      reqStr(form, "customer"),
+      str(form, "title"),
+      num(form, "value"),
+      str(form, "stage") || "Registered",
+      str(form, "support_provided"),
+      str(form, "registered_date") || new Date().toISOString().slice(0, 10),
+      str(form, "notes")
+    );
+  revalidatePartner(partnerId);
+}
+
+export async function updateDealStage(form: FormData) {
+  const stage = reqStr(form, "stage");
+  const closedDate =
+    stage === "Won" || stage === "Lost"
+      ? new Date().toISOString().slice(0, 10)
+      : "";
+  getDb()
+    .prepare("UPDATE deals SET stage = ?, closed_date = ? WHERE id = ?")
+    .run(stage, closedDate, num(form, "id"));
+  revalidatePartner(num(form, "partner_id"));
+}
+
+export async function deleteDeal(form: FormData) {
+  getDb().prepare("DELETE FROM deals WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
 

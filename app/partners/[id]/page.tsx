@@ -14,6 +14,7 @@ import {
 } from "@/components/ui";
 import {
   CompetitorsSection,
+  DealsSection,
   EngagementsSection,
   GoalsSection,
   LicensesSection,
@@ -142,6 +143,7 @@ export default async function PartnerPage({
 
       <PeopleSection detail={detail} />
       <EngagementsSection detail={detail} />
+      <DealsSection detail={detail} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <MdfSection detail={detail} />

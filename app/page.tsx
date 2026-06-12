@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { getDashboard } from "@/lib/data";
+import { getDashboard, listOpenDeals } from "@/lib/data";
+import { formatMoney } from "@/lib/health";
 import { Badge, Card, Empty, HealthBadge, PartnerLink } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
   const data = getDashboard();
+  const openDeals = listOpenDeals();
   const activePartners = data.partners.filter((p) => p.status === "Active");
 
   return (
@@ -154,6 +156,36 @@ export default function DashboardPage() {
                       </a>
                     </>
                   ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card
+          title="Active deals we're supporting"
+          action={
+            <Link
+              href="/deals"
+              className="text-xs font-medium text-sky-700 hover:underline"
+            >
+              All deals →
+            </Link>
+          }
+        >
+          {openDeals.length === 0 ? (
+            <Empty>No open partner deals registered.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {openDeals.map((d) => (
+                <li key={d.id} className="flex items-baseline gap-2 text-sm">
+                  <Badge value={d.stage} />
+                  <span>
+                    <strong>{d.customer}</strong>
+                    {d.title ? ` — ${d.title}` : ""} ·{" "}
+                    {formatMoney(d.value)} via{" "}
+                    <PartnerLink id={d.partner_id} name={d.partner_name} />
+                  </span>
                 </li>
               ))}
             </ul>
