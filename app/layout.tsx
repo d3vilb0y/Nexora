@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { getActiveVendorId, listVendors } from "@/lib/vendor";
+import { VendorSwitcher } from "@/components/vendor-switcher";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,13 +18,17 @@ const NAV = [
   { href: "/people", label: "People" },
   { href: "/certifications", label: "Certifications" },
   { href: "/tiers", label: "Tiers" },
+  { href: "/admin", label: "Admin" },
 ];
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const vendors = listVendors();
+  const activeVendorId = await getActiveVendorId();
+
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full bg-slate-50 text-slate-900">
@@ -31,7 +37,10 @@ export default function RootLayout({
             <Link href="/" className="text-lg font-bold tracking-tight">
               Nexora<span className="text-sky-600">CRM</span>
             </Link>
-            <nav className="-mx-1 flex gap-1 overflow-x-auto">
+            {vendors.length > 0 && (
+              <VendorSwitcher vendors={vendors} activeId={activeVendorId} />
+            )}
+            <nav className="-mx-1 flex gap-1 overflow-x-auto sm:ml-auto">
               {NAV.map((item) => (
                 <Link
                   key={item.href}

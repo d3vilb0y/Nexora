@@ -1,12 +1,14 @@
 import { listPartners, listPeople } from "@/lib/data";
+import { getActiveVendorId } from "@/lib/vendor";
 import { PERSON_ROLES } from "@/lib/types";
 import { Badge, Card, Empty, PartnerLink, btnCls } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function PeoplePage() {
-  const people = listPeople();
-  const partners = listPartners();
+export default async function PeoplePage() {
+  const vendorId = await getActiveVendorId();
+  const people = listPeople(vendorId);
+  const partners = listPartners(vendorId);
   const active = people.filter((p) => p.status === "Active");
   const departed = people.filter((p) => p.status !== "Active");
 
@@ -99,7 +101,7 @@ export default function PeoplePage() {
                   <td className="py-2 pr-4 font-medium">{p.name}</td>
                   <td className="py-2 pr-4">{p.departed_at || "—"}</td>
                   <td className="py-2 pr-4">
-                    <PartnerLink id={p.partner_id} name={p.partner_name} />
+                    <PartnerLink id={p.eff_partner_id} name={p.partner_name} />
                   </td>
                   <td className="py-2 pr-4">{p.departed_to || "unknown"}</td>
                   <td className="py-2 pr-4">{p.cert_count}</td>
@@ -151,10 +153,20 @@ function PeopleTable({
           <tr key={p.id} className="border-b border-slate-100">
             <td className="py-2 pr-4 font-medium">{p.name}</td>
             <td className="py-2 pr-4">
-              <Badge value={p.role} />
+              <span className="flex items-center gap-1.5">
+                <Badge value={p.role} />
+                {p.company_wide === 1 && (
+                  <span
+                    className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700"
+                    title="Shared across every vendor this company works with"
+                  >
+                    shared
+                  </span>
+                )}
+              </span>
             </td>
             <td className="py-2 pr-4">
-              <PartnerLink id={p.partner_id} name={p.partner_name} />
+              <PartnerLink id={p.eff_partner_id} name={p.partner_name} />
             </td>
             <td className="py-2 pr-4">{p.office_name || "—"}</td>
             <td className="py-2 pr-4">{p.email || "—"}</td>

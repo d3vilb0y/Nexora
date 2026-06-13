@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { getDashboard, listOpenDeals } from "@/lib/data";
+import { getActiveVendorId } from "@/lib/vendor";
 import { formatMoney } from "@/lib/health";
 import { Badge, Card, Empty, HealthBadge, PartnerLink } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function DashboardPage() {
-  const data = getDashboard();
-  const openDeals = listOpenDeals();
+export default async function DashboardPage() {
+  const vendorId = await getActiveVendorId();
+  const data = getDashboard(vendorId);
+  const openDeals = listOpenDeals(vendorId);
   const activePartners = data.partners.filter((p) => p.status === "Active");
 
   return (
@@ -140,7 +142,7 @@ export default function DashboardPage() {
               {data.recentDepartures.map((p) => (
                 <li key={p.id} className="text-sm">
                   <strong>{p.name}</strong> left{" "}
-                  <PartnerLink id={p.partner_id} name={p.partner_name} /> on{" "}
+                  <PartnerLink id={p.eff_partner_id} name={p.partner_name} /> on{" "}
                   {p.departed_at}
                   {p.departed_to ? ` → now at ${p.departed_to}` : ""}
                   {p.linkedin_url ? (

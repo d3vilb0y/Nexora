@@ -1,5 +1,6 @@
 import { createPartner } from "@/lib/actions";
 import { listPartners, listTiers } from "@/lib/data";
+import { getActiveVendor } from "@/lib/vendor";
 import { formatMoney } from "@/lib/health";
 import { PARTNER_STATUSES } from "@/lib/types";
 import {
@@ -15,13 +16,19 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default function PartnersPage() {
-  const partners = listPartners();
-  const tiers = listTiers();
+export default async function PartnersPage() {
+  const vendor = await getActiveVendor();
+  const partners = listPartners(vendor.id);
+  const tiers = listTiers(vendor.id);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">Partners</h1>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h1 className="text-xl font-bold">Partners</h1>
+        <span className="text-sm text-slate-500">
+          in the {vendor.name} landscape
+        </span>
+      </div>
 
       <Card title="All partners">
         {partners.length === 0 ? (

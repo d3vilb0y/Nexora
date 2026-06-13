@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createDeal, deleteDeal, updateDealStage } from "@/lib/actions";
 import { listDeals, listLogTargets } from "@/lib/data";
+import { getActiveVendorId } from "@/lib/vendor";
 import { formatMoney } from "@/lib/health";
 import { DEAL_STAGES } from "@/lib/types";
 import {
@@ -16,9 +17,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default function DealsPage() {
-  const deals = listDeals();
-  const partners = listLogTargets();
+export default async function DealsPage() {
+  const vendorId = await getActiveVendorId();
+  const deals = listDeals(vendorId);
+  const partners = listLogTargets(vendorId);
   const open = deals.filter((d) => d.stage !== "Won" && d.stage !== "Lost");
   const wonValue = deals
     .filter((d) => d.stage === "Won")

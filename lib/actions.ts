@@ -1,8 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getDb } from "./db";
+import { ensureVendorTiers, getDb, resolveCompanyId } from "./db";
+import { getActiveVendorId, VENDOR_COOKIE } from "./vendor";
+import { COMPANY_WIDE_ROLES } from "./types";
 import {
   fetchSalesforceDeals,
   importDeals,
@@ -35,16 +38,99 @@ function revalidatePartner(partnerId: number | string) {
   revalidatePath("/deals");
 }
 
-// --- Partners ---
+// --- Vendors (tillverkare) ---
 
-export async function createPartner(form: FormData) {
-  const result = getDb()
+/** Switch which vendor's partner landscape the whole CRM is scoped to. */
+export async function setActiveVendor(form: FormData) {
+  const id = num(form, "vendor_id");
+  (await cookies()).set(VENDOR_COOKIE, String(id), {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+    sameSite: "lax",
+  });
+  revalidatePath("/", "layout");
+}
+
+export async function createVendor(form: FormData) {
+  const db = getDb();
+  const id = Number(
+    db
+      .prepare(
+        "INSERT INTO vendors (name, description, cert_catalog, status) VALUES (?, ?, ?, ?)"
+      )
+      .run(
+        reqStr(form, "name"),
+        str(form, "description"),
+        str(form, "cert_catalog"),
+        str(form, "status") || "Active"
+      ).lastInsertRowid
+  );
+  // Give the new vendor a usable program tier ladder out of the box.
+  ensureVendorTiers(db, id);
+  // Focus the freshly created vendor right away.
+  (await cookies()).set(VENDOR_COOKIE, String(id), {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+    sameSite: "lax",
+  });
+  revalidatePath("/", "layout");
+  redirect("/admin");
+}
+
+export async function updateVendor(form: FormData) {
+  getDb()
     .prepare(
-      `INSERT INTO partners (name, tier, status, website, region, annual_revenue, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      "UPDATE vendors SET name = ?, description = ?, cert_catalog = ?, status = ? WHERE id = ?"
     )
     .run(
       reqStr(form, "name"),
+      str(form, "description"),
+      str(form, "cert_catalog"),
+      str(form, "status") || "Active",
+      num(form, "id")
+    );
+  revalidatePath("/", "layout");
+  revalidatePath("/admin");
+}
+
+export async function deleteVendor(form: FormData) {
+  const db = getDb();
+  const id = num(form, "id");
+  const total = (
+    db.prepare("SELECT COUNT(*) AS c FROM vendors").get() as { c: number }
+  ).c;
+  if (total <= 1) {
+    redirect("/admin?error=" + encodeURIComponent("Can't delete the last vendor — the CRM needs at least one."));
+  }
+  // Cascades to the vendor's partners and everything hanging off them.
+  db.prepare("DELETE FROM vendors WHERE id = ?").run(id);
+  // If the deleted vendor was in focus, fall back to whatever remains.
+  const store = await cookies();
+  if (store.get(VENDOR_COOKIE)?.value === String(id)) {
+    store.delete(VENDOR_COOKIE);
+  }
+  revalidatePath("/", "layout");
+  redirect("/admin");
+}
+
+// --- Partners ---
+
+export async function createPartner(form: FormData) {
+  const vendorId = await getActiveVendorId();
+  const db = getDb();
+  const name = reqStr(form, "name");
+  // Same company name (in any vendor) → same company, so its Sales/Management
+  // people follow it into this vendor automatically.
+  const companyId = resolveCompanyId(db, name);
+  const result = db
+    .prepare(
+      `INSERT INTO partners (vendor_id, company_id, name, tier, status, website, region, annual_revenue, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      vendorId,
+      companyId,
+      name,
       str(form, "tier") || "Authorized",
       str(form, "status") || "Active",
       str(form, "website"),
@@ -77,8 +163,26 @@ export async function updatePartner(form: FormData) {
 }
 
 export async function deletePartner(form: FormData) {
+  const db = getDb();
   const id = num(form, "id");
-  getDb().prepare("DELETE FROM partners WHERE id = ?").run(id);
+  const partner = db
+    .prepare("SELECT company_id FROM partners WHERE id = ?")
+    .get(id) as { company_id: number } | undefined;
+  // Company-wide people homed at this partner must survive if the company is
+  // still engaged with other vendors — re-home them to a sibling partner.
+  if (partner) {
+    const sibling = db
+      .prepare(
+        "SELECT id FROM partners WHERE company_id = ? AND id != ? LIMIT 1"
+      )
+      .get(partner.company_id, id) as { id: number } | undefined;
+    if (sibling) {
+      db.prepare(
+        "UPDATE people SET partner_id = ? WHERE partner_id = ? AND company_wide = 1"
+      ).run(sibling.id, id);
+    }
+  }
+  db.prepare("DELETE FROM partners WHERE id = ?").run(id);
   revalidatePartner(id);
   redirect("/partners");
 }
@@ -111,18 +215,29 @@ export async function deleteOffice(form: FormData) {
 // --- People ---
 
 export async function createPerson(form: FormData) {
+  const db = getDb();
   const partnerId = num(form, "partner_id");
   const officeId = num(form, "office_id");
-  getDb()
+  const role = str(form, "role") || "Sales";
+  // Sales/Management belong to the whole company (visible under every vendor it
+  // works with); Technical/Other are anchored to this one vendor relationship.
+  const companyWide = COMPANY_WIDE_ROLES.includes(role) ? 1 : 0;
+  const partner = db
+    .prepare("SELECT company_id FROM partners WHERE id = ?")
+    .get(partnerId) as { company_id: number } | undefined;
+  db
     .prepare(
-      `INSERT INTO people (partner_id, office_id, name, role, title, email, phone, linkedin_url, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO people (partner_id, company_id, company_wide, office_id, name, role, title, email, phone, linkedin_url, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       partnerId,
-      officeId > 0 ? officeId : null,
+      partner?.company_id ?? null,
+      companyWide,
+      // A company-wide person isn't tied to one vendor's office.
+      !companyWide && officeId > 0 ? officeId : null,
       reqStr(form, "name"),
-      str(form, "role") || "Sales",
+      role,
       str(form, "title"),
       str(form, "email"),
       str(form, "phone"),
@@ -173,20 +288,28 @@ export async function deletePerson(form: FormData) {
 // --- Certifications ---
 
 export async function createCertification(form: FormData) {
-  getDb()
+  const db = getDb();
+  const partnerId = num(form, "partner_id");
+  // The cert belongs to the program of whichever vendor we're adding it under,
+  // so a shared person can hold (e.g.) F5 and Check Point certs side by side.
+  const partner = db
+    .prepare("SELECT vendor_id FROM partners WHERE id = ?")
+    .get(partnerId) as { vendor_id: number } | undefined;
+  db
     .prepare(
-      `INSERT INTO certifications (person_id, name, level, issued_date, expiry_date, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO certifications (person_id, vendor_id, name, level, issued_date, expiry_date, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       num(form, "person_id"),
+      partner?.vendor_id ?? null,
       reqStr(form, "name"),
       str(form, "level"),
       str(form, "issued_date"),
       str(form, "expiry_date"),
       str(form, "notes")
     );
-  revalidatePartner(num(form, "partner_id"));
+  revalidatePartner(partnerId);
 }
 
 export async function deleteCertification(form: FormData) {
@@ -305,19 +428,21 @@ function redirectWithError(message: string): never {
 }
 
 export async function importDealsFromCsv(form: FormData) {
+  const vendorId = await getActiveVendorId();
   const file = form.get("file");
   if (!(file instanceof File) || file.size === 0) {
     redirectWithError("No file uploaded.");
   }
   const { records, error } = parseSalesforceCsv(await file.text());
   if (error) redirectWithError(error);
-  redirectWithSummary(importDeals(records));
+  redirectWithSummary(importDeals(records, vendorId));
 }
 
 export async function importDealsFromSalesforceApi() {
+  const vendorId = await getActiveVendorId();
   let summary: ImportSummary;
   try {
-    summary = importDeals(await fetchSalesforceDeals());
+    summary = importDeals(await fetchSalesforceDeals(), vendorId);
   } catch (err) {
     redirectWithError(err instanceof Error ? err.message : "Salesforce sync failed.");
   }

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { deletePartner, updatePartner } from "@/lib/actions";
 import { getPartnerDetail } from "@/lib/data";
@@ -36,7 +37,7 @@ export default async function PartnerPage({
   const detail = getPartnerDetail(Number(id));
   if (!detail) notFound();
 
-  const { partner, tiers } = detail;
+  const { partner, tiers, vendor, siblings } = detail;
   const gap = partner.gap;
 
   return (
@@ -58,9 +59,24 @@ export default async function PartnerPage({
         )}
         <span className="text-sm text-slate-500">
           {partner.region && `· ${partner.region}`} · revenue{" "}
-          {formatMoney(partner.annual_revenue)}
+          {formatMoney(partner.annual_revenue)} · vendor {vendor.name}
         </span>
       </div>
+
+      {siblings.length > 0 && (
+        <div className="rounded-md border border-indigo-100 bg-indigo-50/50 px-4 py-2 text-sm text-indigo-900">
+          Same company is also a partner under{" "}
+          {siblings.map((s, i) => (
+            <span key={s.id}>
+              {i > 0 && ", "}
+              <Link href={`/partners/${s.id}`} className="font-medium hover:underline">
+                {s.vendor_name}
+              </Link>
+            </span>
+          ))}
+          . Sales &amp; Management contacts are shared across them.
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Tier gap analysis">

@@ -5,8 +5,19 @@ and technical people, certification levels and expiry dates, engagement
 history, MDF budgets, NFR licenses, joint business plans, needs and problems —
 with a health score and tier gap analysis on top.
 
+It is **multi-vendor**: run partner programs for several manufacturers
+(tillverkare) — F5, Citrix, Check Point, Zscaler… — side by side and switch
+between their partner landscapes with one click.
+
 ## Features
 
+- **Multi-vendor (tillverkare)** — every partner, person, certification, deal
+  and program tier belongs to a vendor. A picker in the header switches which
+  vendor&rsquo;s landscape the whole CRM is scoped to, and the **Admin** page is
+  where vendors are configured (name, description, a certification catalog that
+  suggests cert names, and active/archived status). Each vendor gets its own
+  Authorized / Silver / Gold tier ladder. Deleting a vendor removes its whole
+  landscape; the last vendor can&rsquo;t be deleted.
 - **Partners** — tier (Authorized / Silver / Gold), status, region, revenue, notes.
 - **Personnel** — sales & technical contacts per partner with LinkedIn profiles,
   shown as compact expandable rows, plus **churn tracking**: mark a person
@@ -19,9 +30,9 @@ with a health score and tier gap analysis on top.
   reminders on the dashboard (90-day window), since tier status often depends
   on keeping N people certified. Certs held by departed people stop counting.
 - **Tier gap analysis** — per-tier requirements (cert count, revenue) are
-  editable on the Tiers page; each partner page shows what's missing to
-  maintain the current tier or advance to the next one, and the dashboard
-  flags tiers at risk.
+  editable on the Tiers page (per vendor); each partner page shows what's
+  missing to maintain the current tier or advance to the next one, and the
+  dashboard flags tiers at risk.
 - **Engagement history** — quick mobile-friendly logger (visits, lunches,
   QBRs…) with attendees and topic chips; an engagement can span several
   partners at once (e.g. a joint training); partners with no touchpoint in

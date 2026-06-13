@@ -1,12 +1,14 @@
 import { listLogTargets, listRecentEngagements } from "@/lib/data";
+import { getActiveVendorId } from "@/lib/vendor";
 import { Badge, Card, Empty, PartnerLink } from "@/components/ui";
 import { QuickLogForm } from "@/components/quick-log-form";
 
 export const dynamic = "force-dynamic";
 
-export default function LogPage() {
-  const targets = listLogTargets();
-  const recent = listRecentEngagements(25);
+export default async function LogPage() {
+  const vendorId = await getActiveVendorId();
+  const targets = listLogTargets(vendorId);
+  const recent = listRecentEngagements(vendorId, 25);
 
   return (
     <div className="space-y-6">

@@ -1,13 +1,31 @@
+export type Vendor = {
+  id: number;
+  name: string;
+  description: string;
+  cert_catalog: string;
+  status: string;
+  created_at: string;
+};
+
 export type Tier = {
   id: number;
+  vendor_id: number;
   name: string;
   rank: number;
   min_active_certs: number;
   min_annual_revenue: number;
 };
 
+export type Company = {
+  id: number;
+  name: string;
+  created_at: string;
+};
+
 export type Partner = {
   id: number;
+  vendor_id: number;
+  company_id: number;
   name: string;
   tier: string;
   status: string;
@@ -33,6 +51,9 @@ export type Office = {
 export type Person = {
   id: number;
   partner_id: number;
+  company_id: number;
+  /** 1 = shared across every vendor the company is engaged with (Sales/Management). */
+  company_wide: number;
   office_id: number | null;
   name: string;
   role: string;
@@ -50,6 +71,7 @@ export type Person = {
 export type Certification = {
   id: number;
   person_id: number;
+  vendor_id: number;
   name: string;
   level: string;
   issued_date: string;
@@ -147,6 +169,13 @@ export type Problem = {
 };
 
 export const PERSON_ROLES = ["Sales", "Technical", "Management", "Other"];
+/**
+ * Roles that belong to the company as a whole rather than to one vendor
+ * relationship: they auto-appear under every vendor the company is engaged
+ * with. Technical (and Other) staff are added per vendor, since being
+ * technical for one vendor doesn't imply certification on another.
+ */
+export const COMPANY_WIDE_ROLES = ["Sales", "Management"];
 export const ENGAGEMENT_TYPES = [
   "Visit",
   "Lunch/Dinner",
@@ -177,3 +206,16 @@ export const SEVERITIES = ["Low", "Medium", "High", "Critical"];
 export const NEED_STATUSES = ["Open", "In progress", "Done"];
 export const PROBLEM_STATUSES = ["Open", "Monitoring", "Resolved"];
 export const PARTNER_STATUSES = ["Active", "Onboarding", "Inactive"];
+export const VENDOR_STATUSES = ["Active", "Archived"];
+
+/** The default program tiers seeded for every new vendor. */
+export const DEFAULT_TIERS: {
+  name: string;
+  rank: number;
+  min_active_certs: number;
+  min_annual_revenue: number;
+}[] = [
+  { name: "Authorized", rank: 1, min_active_certs: 1, min_annual_revenue: 0 },
+  { name: "Silver", rank: 2, min_active_certs: 3, min_annual_revenue: 100000 },
+  { name: "Gold", rank: 3, min_active_certs: 6, min_annual_revenue: 500000 },
+];
