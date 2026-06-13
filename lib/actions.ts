@@ -36,6 +36,8 @@ function revalidatePartner(partnerId: number | string) {
   revalidatePath("/certifications");
   revalidatePath("/log");
   revalidatePath("/deals");
+  revalidatePath("/companies");
+  revalidatePath("/activity");
 }
 
 // --- Vendors (tillverkare) ---
@@ -604,6 +606,33 @@ export async function updateProblemStatus(form: FormData) {
 export async function deleteProblem(form: FormData) {
   getDb().prepare("DELETE FROM problems WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
+}
+
+// --- Follow-ups (next actions) ---
+
+export async function createFollowUp(form: FormData) {
+  const partnerId = num(form, "partner_id");
+  getDb()
+    .prepare(
+      "INSERT INTO follow_ups (partner_id, title, due_date) VALUES (?, ?, ?)"
+    )
+    .run(partnerId, reqStr(form, "title"), str(form, "due_date"));
+  revalidatePartner(partnerId);
+  revalidatePath("/activity");
+}
+
+export async function toggleFollowUp(form: FormData) {
+  getDb()
+    .prepare("UPDATE follow_ups SET done = CASE done WHEN 1 THEN 0 ELSE 1 END WHERE id = ?")
+    .run(num(form, "id"));
+  revalidatePartner(num(form, "partner_id"));
+  revalidatePath("/activity");
+}
+
+export async function deleteFollowUp(form: FormData) {
+  getDb().prepare("DELETE FROM follow_ups WHERE id = ?").run(num(form, "id"));
+  revalidatePartner(num(form, "partner_id"));
+  revalidatePath("/activity");
 }
 
 // --- Tiers ---

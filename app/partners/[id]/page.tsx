@@ -17,6 +17,7 @@ import {
   CompetitorsSection,
   DealsSection,
   EngagementsSection,
+  FollowUpsSection,
   GoalsSection,
   LicensesSection,
   MdfSection,
@@ -158,6 +159,7 @@ export default async function PartnerPage({
         </Card>
       </div>
 
+      <FollowUpsSection detail={detail} />
       <OfficesSection detail={detail} />
       <PeopleSection detail={detail} />
       <EngagementsSection detail={detail} />

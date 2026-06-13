@@ -202,6 +202,15 @@ function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS follow_ups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      due_date TEXT NOT NULL DEFAULT '',
+      done INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_attendees_person ON engagement_attendees(person_id);
     CREATE INDEX IF NOT EXISTS idx_engagement_partners ON engagement_partners(partner_id);
     CREATE INDEX IF NOT EXISTS idx_offices_partner ON offices(partner_id);
@@ -215,6 +224,7 @@ function migrate(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_competitors_partner ON competitors(partner_id);
     CREATE INDEX IF NOT EXISTS idx_needs_partner ON needs(partner_id);
     CREATE INDEX IF NOT EXISTS idx_problems_partner ON problems(partner_id);
+    CREATE INDEX IF NOT EXISTS idx_followups_partner ON follow_ups(partner_id);
   `);
 
   // Upgrade databases created before later features existed.

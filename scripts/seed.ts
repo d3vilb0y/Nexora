@@ -155,6 +155,9 @@ const addNeed = db.prepare(
 const addProblem = db.prepare(
   `INSERT INTO problems (partner_id, title, description, severity, status) VALUES (?, ?, ?, ?, ?)`
 );
+const addFollowUp = db.prepare(
+  `INSERT INTO follow_ups (partner_id, title, due_date, done) VALUES (?, ?, ?, ?)`
+);
 
 // =====================================================================
 // Vendor 1 — Zscaler (the populated SSE partner landscape)
@@ -211,6 +214,9 @@ addGoal.run(northwind, 2026, "Grow services revenue", "$250k attach", 35, "");
 addCompetitor.run(northwind, "Cloudflare", "Pitches Cloudflare One when price pressure is high");
 addNeed.run(northwind, "ZDX recertification for Cecilia", "Her ZDX cert expired — book the exam.", "High", "Open");
 addProblem.run(northwind, "Backfill for departed engineer", "David's departure leaves a demo-delivery gap.", "Medium", "Open");
+addFollowUp.run(northwind, "Send September roadshow MDF budget", iso(-3), 0);
+addFollowUp.run(northwind, "Book Cecilia's ZDX re-exam", iso(12), 0);
+addFollowUp.run(northwind, "Share latest ZPA roadmap deck", iso(-20), 1);
 
 // --- Apex Networks (Silver, tier at risk: too few active certs) ---
 const apex = mkPartner(zscaler, "Apex Networks", "Silver", "Active",
@@ -233,6 +239,7 @@ addLicense.run(apex, "ZPA NFR tenant", "NFR", "APX-ZPA-007", iso(-200), iso(40),
 addGoal.run(apex, 2026, "Reach Gold tier", "6 active certs / $500k", 25, "Needs 4 more certified people");
 addCompetitor.run(apex, "Netskope", "Legacy Netskope practice from an acquisition");
 addNeed.run(apex, "Two engineers through ZIA training", "Required to keep Silver after Stefan left.", "High", "In progress");
+addFollowUp.run(apex, "Confirm two seats for ZIA bootcamp", iso(5), 0);
 addProblem.run(apex, "Cert coverage below Silver requirement", "Only 2 active certs, 3 required.", "High", "Open");
 
 // --- Meridian IT (Authorized, gone quiet) ---
@@ -337,5 +344,6 @@ addDeal.run(cygatesF5, "Nordbank", "WAF + Distributed Cloud", 220000,
 
 console.log(
   "Seeded demo data: 3 vendors (Zscaler, F5, Check Point), 6 partners across 5 companies " +
-    "(Cygates spans F5 + Check Point), shared Sales/Management, per-vendor technical staff and certs."
+    "(Cygates spans F5 + Check Point), shared Sales/Management, per-vendor technical staff and certs, " +
+    "plus follow-up next-actions."
 );

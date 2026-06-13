@@ -5,6 +5,7 @@ import {
   createCompetitor,
   createDeal,
   createEngagement,
+  createFollowUp,
   createGoal,
   createLicense,
   createMdfEntry,
@@ -16,6 +17,7 @@ import {
   deleteCompetitor,
   deleteDeal,
   deleteEngagement,
+  deleteFollowUp,
   deleteGoal,
   deleteLicense,
   deleteMdfEntry,
@@ -26,6 +28,7 @@ import {
   markPersonDeparted,
   reactivatePerson,
   setPersonOffice,
+  toggleFollowUp,
   updateDealStage,
   updateGoalProgress,
   updateNeedStatus,
@@ -1132,6 +1135,90 @@ export function ProblemsSection({ detail }: { detail: PartnerDetail }) {
           <div className="md:col-span-4">
             <button type="submit" className={btnCls}>
               Add problem
+            </button>
+          </div>
+        </form>
+      </AddForm>
+    </Card>
+  );
+}
+
+// --- Follow-ups (next actions) ---
+
+export function FollowUpsSection({ detail }: { detail: PartnerDetail }) {
+  const { partner, followUps } = detail;
+  const today = new Date().toISOString().slice(0, 10);
+  const open = followUps.filter((f) => f.done === 0);
+  const done = followUps.filter((f) => f.done === 1);
+  return (
+    <Card title="Follow-ups / next actions">
+      {open.length === 0 && done.length === 0 ? (
+        <Empty>No follow-ups yet — add the next thing you owe this partner.</Empty>
+      ) : (
+        <ul className="space-y-2">
+          {[...open, ...done].map((f) => {
+            const overdue =
+              f.done === 0 && f.due_date !== "" && f.due_date < today;
+            return (
+              <li
+                key={f.id}
+                className="flex flex-wrap items-center gap-2 text-sm"
+              >
+                <form action={toggleFollowUp}>
+                  <HiddenIds partnerId={partner.id} id={f.id} />
+                  <button
+                    type="submit"
+                    className="text-xs text-sky-700 hover:underline"
+                    title={f.done ? "Reopen" : "Mark done"}
+                  >
+                    {f.done ? "☑" : "☐"}
+                  </button>
+                </form>
+                <span
+                  className={
+                    f.done
+                      ? "text-slate-400 line-through"
+                      : "font-medium"
+                  }
+                >
+                  {f.title}
+                </span>
+                {f.due_date && (
+                  <span
+                    className={`text-xs ${overdue ? "font-semibold text-rose-600" : "text-slate-400"}`}
+                  >
+                    due {f.due_date}
+                    {overdue ? " — overdue" : ""}
+                  </span>
+                )}
+                <form action={deleteFollowUp} className="ml-auto">
+                  <HiddenIds partnerId={partner.id} id={f.id} />
+                  <DeleteButton label="Remove" />
+                </form>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <AddForm label="Add follow-up">
+        <form action={createFollowUp} className="grid gap-3 md:grid-cols-4">
+          <HiddenIds partnerId={partner.id} />
+          <div className="md:col-span-2">
+            <Field label="Next action *">
+              <input
+                name="title"
+                required
+                className={inputCls}
+                placeholder="e.g. Send Q3 enablement plan"
+              />
+            </Field>
+          </div>
+          <Field label="Due date">
+            <input type="date" name="due_date" className={inputCls} />
+          </Field>
+          <div className="flex items-end">
+            <button type="submit" className={btnCls}>
+              Add follow-up
             </button>
           </div>
         </form>

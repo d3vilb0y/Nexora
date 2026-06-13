@@ -168,6 +168,17 @@ export type Problem = {
   created_at: string;
 };
 
+export type FollowUp = {
+  id: number;
+  partner_id: number;
+  title: string;
+  /** ISO date (YYYY-MM-DD); empty string means no due date. */
+  due_date: string;
+  /** 1 = completed. */
+  done: number;
+  created_at: string;
+};
+
 export const PERSON_ROLES = ["Sales", "Technical", "Management", "Other"];
 /**
  * Roles that belong to the company as a whole rather than to one vendor
