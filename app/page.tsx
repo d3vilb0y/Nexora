@@ -142,7 +142,7 @@ export default async function DashboardPage() {
               {data.recentDepartures.map((p) => (
                 <li key={p.id} className="text-sm">
                   <strong>{p.name}</strong> left{" "}
-                  <PartnerLink id={p.partner_id} name={p.partner_name} /> on{" "}
+                  <PartnerLink id={p.eff_partner_id} name={p.partner_name} /> on{" "}
                   {p.departed_at}
                   {p.departed_to ? ` → now at ${p.departed_to}` : ""}
                   {p.linkedin_url ? (

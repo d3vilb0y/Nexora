@@ -2,11 +2,14 @@
  * Seeds the database with demo data so every dashboard panel has content.
  * Run with: npm run seed   (wipes existing data first)
  *
- * The data spans several vendors (tillverkare) to show off the multi-brand
- * switching: a populated Zscaler landscape, an F5 landscape with Ted Nordvall's
- * certifications, and an empty Check Point landscape ready to fill in.
+ * The data spans several vendors (tillverkare) to show off multi-brand
+ * switching and shared personnel:
+ *   - a populated Zscaler landscape;
+ *   - an F5 landscape with Ted Nordvall's certifications;
+ *   - Cygates, the same company partnered under BOTH F5 and Check Point, whose
+ *     Sales/Management people are shared while technical staff are per-vendor.
  */
-import { ensureVendorTiers, getDb } from "../lib/db.ts";
+import { ensureVendorTiers, getDb, resolveCompanyId } from "../lib/db.ts";
 
 const db = getDb();
 
@@ -18,17 +21,14 @@ db.exec(`
   DELETE FROM business_goals; DELETE FROM licenses; DELETE FROM mdf_entries;
   DELETE FROM deals; DELETE FROM engagement_partners; DELETE FROM engagement_attendees;
   DELETE FROM engagements; DELETE FROM certifications; DELETE FROM people;
-  DELETE FROM offices; DELETE FROM partners; DELETE FROM tiers; DELETE FROM vendors;
+  DELETE FROM offices; DELETE FROM partners; DELETE FROM tiers;
+  DELETE FROM companies; DELETE FROM vendors;
 `);
 
 const addVendor = db.prepare(
   `INSERT INTO vendors (name, description, cert_catalog, status) VALUES (?, ?, ?, ?)`
 );
-function createVendor(
-  name: string,
-  description: string,
-  certCatalog: string
-): number {
+function createVendor(name: string, description: string, certCatalog: string): number {
   const id = Number(
     addVendor.run(name, description, certCatalog, "Active").lastInsertRowid
   );
@@ -36,22 +36,77 @@ function createVendor(
   return id;
 }
 
-const addPartner = db.prepare(
-  `INSERT INTO partners (vendor_id, name, tier, status, website, region, annual_revenue, notes)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+const addPartnerStmt = db.prepare(
+  `INSERT INTO partners (vendor_id, company_id, name, tier, status, website, region, annual_revenue, notes)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
+function mkPartner(
+  vendorId: number,
+  name: string,
+  tier: string,
+  status: string,
+  website: string,
+  region: string,
+  revenue: number,
+  notes: string
+): number {
+  return Number(
+    addPartnerStmt.run(
+      vendorId, resolveCompanyId(db, name), name, tier, status, website, region, revenue, notes
+    ).lastInsertRowid
+  );
+}
+
 const addOffice = db.prepare(
   `INSERT INTO offices (partner_id, name, region, address) VALUES (?, ?, ?, ?)`
 );
-const addPerson = db.prepare(
-  `INSERT INTO people (partner_id, name, role, title, email, phone, linkedin_url, status, departed_at, departed_to, notes)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-);
 const setOffice = db.prepare(`UPDATE people SET office_id = ? WHERE id = ?`);
-const addCert = db.prepare(
-  `INSERT INTO certifications (person_id, name, level, issued_date, expiry_date)
-   VALUES (?, ?, ?, ?, ?)`
+
+const COMPANY_WIDE_ROLES = ["Sales", "Management"];
+const addPersonStmt = db.prepare(
+  `INSERT INTO people (partner_id, company_id, company_wide, office_id, name, role, title, email, phone, linkedin_url, status, departed_at, departed_to, notes)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
+function mkPerson(
+  partnerId: number,
+  name: string,
+  role: string,
+  title: string,
+  email = "",
+  phone = "",
+  linkedin = "",
+  status = "Active",
+  departedAt = "",
+  departedTo = "",
+  notes = ""
+): number {
+  const { company_id } = db
+    .prepare("SELECT company_id FROM partners WHERE id = ?")
+    .get(partnerId) as { company_id: number };
+  const cw = COMPANY_WIDE_ROLES.includes(role) ? 1 : 0;
+  return Number(
+    addPersonStmt.run(
+      partnerId, company_id, cw, null, name, role, title,
+      email, phone, linkedin, status, departedAt, departedTo, notes
+    ).lastInsertRowid
+  );
+}
+
+const addCertStmt = db.prepare(
+  `INSERT INTO certifications (person_id, vendor_id, name, level, issued_date, expiry_date)
+   VALUES (?, ?, ?, ?, ?, ?)`
+);
+function mkCert(
+  personId: number,
+  vendorId: number,
+  name: string,
+  level: string,
+  issued: string,
+  expiry: string
+) {
+  addCertStmt.run(personId, vendorId, name, level, issued, expiry);
+}
+
 const addEngagementStmt = db.prepare(
   `INSERT INTO engagements (partner_id, type, date, summary, topics, details) VALUES (?, ?, ?, ?, ?, ?)`
 );
@@ -72,8 +127,7 @@ function addEngagement(
 ) {
   const ids = Array.isArray(partnerIds) ? partnerIds : [partnerIds];
   const id = Number(
-    addEngagementStmt.run(ids[0], type, date, summary, topics, details)
-      .lastInsertRowid
+    addEngagementStmt.run(ids[0], type, date, summary, topics, details).lastInsertRowid
   );
   for (const pid of ids) addEngagementPartner.run(id, pid);
   for (const personId of attendees) addAttendee.run(id, personId);
@@ -112,53 +166,33 @@ const zscaler = createVendor(
 );
 
 // --- Northwind Secure (Gold, healthy but a cert is expiring soon) ---
-const northwind = Number(
-  addPartner.run(
-    zscaler,
-    "Northwind Secure",
-    "Gold",
-    "Active",
-    "https://northwindsecure.example",
-    "Nordics",
-    750000,
-    "Largest partner in the region, strong technical bench."
-  ).lastInsertRowid
-);
+const northwind = mkPartner(zscaler, "Northwind Secure", "Gold", "Active",
+  "https://northwindsecure.example", "Nordics", 750000,
+  "Largest partner in the region, strong technical bench.");
 const nwStockholm = Number(
   addOffice.run(northwind, "Stockholm HQ", "Sweden", "Vasagatan 12, Stockholm").lastInsertRowid
 );
 const nwMalmo = Number(
   addOffice.run(northwind, "Malmö office", "Sweden South", "Stortorget 3, Malmö").lastInsertRowid
 );
-const anna = Number(
-  addPerson.run(northwind, "Anna Larsson", "Technical", "Lead Security Engineer",
-    "anna@northwindsecure.example", "+46 70 123 4567",
-    "https://linkedin.com/in/anna-larsson-example", "Active", "", "", ""
-  ).lastInsertRowid
-);
-const bjorn = Number(
-  addPerson.run(northwind, "Björn Eriksson", "Sales", "Account Director",
-    "bjorn@northwindsecure.example", "+46 70 234 5678",
-    "https://linkedin.com/in/bjorn-eriksson-example", "Active", "", "", ""
-  ).lastInsertRowid
-);
-const cecilia = Number(
-  addPerson.run(northwind, "Cecilia Nyström", "Technical", "Solutions Architect",
-    "cecilia@northwindsecure.example", "", "", "Active", "", "", ""
-  ).lastInsertRowid
-);
-addPerson.run(northwind, "David Holm", "Technical", "Senior Engineer",
-  "", "", "https://linkedin.com/in/david-holm-example",
-  "Departed", iso(-21), "Cloudbreak Consulting", "Took two cert holders' knowledge with him."
-);
+const anna = mkPerson(northwind, "Anna Larsson", "Technical", "Lead Security Engineer",
+  "anna@northwindsecure.example", "+46 70 123 4567",
+  "https://linkedin.com/in/anna-larsson-example");
+const bjorn = mkPerson(northwind, "Björn Eriksson", "Sales", "Account Director",
+  "bjorn@northwindsecure.example", "+46 70 234 5678",
+  "https://linkedin.com/in/bjorn-eriksson-example");
+const cecilia = mkPerson(northwind, "Cecilia Nyström", "Technical", "Solutions Architect",
+  "cecilia@northwindsecure.example");
+mkPerson(northwind, "David Holm", "Technical", "Senior Engineer", "", "",
+  "https://linkedin.com/in/david-holm-example", "Departed", iso(-21),
+  "Cloudbreak Consulting", "Took two cert holders' knowledge with him.");
 setOffice.run(nwStockholm, anna);
-setOffice.run(nwStockholm, bjorn);
 setOffice.run(nwMalmo, cecilia);
-addCert.run(anna, "ZIA", "Professional", iso(-305), iso(60));
-addCert.run(anna, "ZPA", "Professional", iso(-200), iso(165));
-addCert.run(bjorn, "Sales Foundation", "Associate", iso(-100), iso(265));
-addCert.run(cecilia, "ZIA", "Associate", iso(-50), iso(315));
-addCert.run(cecilia, "ZDX", "Professional", iso(-400), iso(-35));
+mkCert(anna, zscaler, "ZIA", "Professional", iso(-305), iso(60));
+mkCert(anna, zscaler, "ZPA", "Professional", iso(-200), iso(165));
+mkCert(bjorn, zscaler, "Sales Foundation", "Associate", iso(-100), iso(265));
+mkCert(cecilia, zscaler, "ZIA", "Associate", iso(-50), iso(315));
+mkCert(cecilia, zscaler, "ZDX", "Professional", iso(-400), iso(-35));
 addEngagement(northwind, [bjorn, anna], "QBR", iso(-15),
   "Q2 QBR — pipeline up 20%, agreed on joint event in September.",
   "Pipeline, MDF/Marketing", "They want co-funding for a September roadshow; follow up with budget.");
@@ -179,30 +213,17 @@ addNeed.run(northwind, "ZDX recertification for Cecilia", "Her ZDX cert expired 
 addProblem.run(northwind, "Backfill for departed engineer", "David's departure leaves a demo-delivery gap.", "Medium", "Open");
 
 // --- Apex Networks (Silver, tier at risk: too few active certs) ---
-const apex = Number(
-  addPartner.run(
-    zscaler,
-    "Apex Networks", "Silver", "Active", "https://apexnetworks.example",
-    "DACH", 140000, "Ambitious, wants Gold next year."
-  ).lastInsertRowid
-);
-const markus = Number(
-  addPerson.run(apex, "Markus Weber", "Technical", "Network Engineer",
-    "markus@apexnetworks.example", "", "https://linkedin.com/in/markus-weber-example",
-    "Active", "", "", ""
-  ).lastInsertRowid
-);
-const julia = Number(
-  addPerson.run(apex, "Julia Brandt", "Sales", "Partner Manager",
-    "julia@apexnetworks.example", "+49 151 1234567", "", "Active", "", "", ""
-  ).lastInsertRowid
-);
-addPerson.run(apex, "Stefan Koch", "Technical", "Security Consultant",
-  "", "", "https://linkedin.com/in/stefan-koch-example",
-  "Departed", iso(-45), "Trireme Security GmbH", "Held their second ZIA cert — Silver now at risk."
-);
-addCert.run(markus, "ZIA", "Professional", iso(-150), iso(25));
-addCert.run(julia, "Sales Foundation", "Associate", iso(-90), iso(275));
+const apex = mkPartner(zscaler, "Apex Networks", "Silver", "Active",
+  "https://apexnetworks.example", "DACH", 140000, "Ambitious, wants Gold next year.");
+const markus = mkPerson(apex, "Markus Weber", "Technical", "Network Engineer",
+  "markus@apexnetworks.example", "", "https://linkedin.com/in/markus-weber-example");
+const julia = mkPerson(apex, "Julia Brandt", "Sales", "Partner Manager",
+  "julia@apexnetworks.example", "+49 151 1234567");
+mkPerson(apex, "Stefan Koch", "Technical", "Security Consultant", "", "",
+  "https://linkedin.com/in/stefan-koch-example", "Departed", iso(-45),
+  "Trireme Security GmbH", "Held their second ZIA cert — Silver now at risk.");
+mkCert(markus, zscaler, "ZIA", "Professional", iso(-150), iso(25));
+mkCert(julia, zscaler, "Sales Foundation", "Associate", iso(-90), iso(275));
 addEngagement(apex, [julia], "Call", iso(-10),
   "Discussed Gold requirements and cert plan for H2.", "Certifications, Pipeline");
 addEngagement(apex, [markus, julia], "Visit", iso(-30),
@@ -215,32 +236,21 @@ addNeed.run(apex, "Two engineers through ZIA training", "Required to keep Silver
 addProblem.run(apex, "Cert coverage below Silver requirement", "Only 2 active certs, 3 required.", "High", "Open");
 
 // --- Meridian IT (Authorized, gone quiet) ---
-const meridian = Number(
-  addPartner.run(
-    zscaler,
-    "Meridian IT", "Authorized", "Active", "https://meridianit.example",
-    "Benelux", 30000, "Transactional partner, little engagement lately."
-  ).lastInsertRowid
-);
-const piet = Number(
-  addPerson.run(meridian, "Piet Janssen", "Sales", "Owner",
-    "piet@meridianit.example", "", "", "Active", "", "", ""
-  ).lastInsertRowid
-);
-addCert.run(piet, "Sales Foundation", "Associate", iso(-400), iso(-30));
+const meridian = mkPartner(zscaler, "Meridian IT", "Authorized", "Active",
+  "https://meridianit.example", "Benelux", 30000, "Transactional partner, little engagement lately.");
+const piet = mkPerson(meridian, "Piet Janssen", "Sales", "Owner", "piet@meridianit.example");
+mkCert(piet, zscaler, "Sales Foundation", "Associate", iso(-400), iso(-30));
 addEngagement(meridian, [piet], "Email", iso(-95), "Sent renewal reminder, no reply.", "Relationship");
 addNeed.run(meridian, "Re-engagement plan", "No touchpoint in three months.", "Medium", "Open");
 addProblem.run(meridian, "Unresponsive to outreach", "Risk of partner churn.", "Critical", "Open");
 addCompetitor.run(meridian, "Zscaler", "Also resells us via a distributor — and pitches Palo Alto");
 
-// Joint training across all three Zscaler partners
 addEngagement([northwind, apex, meridian], [anna, cecilia, markus, piet],
   "Enablement session", iso(-3),
   "Regional partner training day — SSE deep dive for three partners.",
   "Enablement, Certifications, Roadmap",
   "Strong turnout; Apex asked for a follow-up cert bootcamp in Q3.");
 
-// Deals partners brought us into
 addDeal.run(northwind, "ScandiRetail AB", "SSE rollout, 1200 users", 180000,
   "In progress", "Joint demo + PoC support", iso(-25), "", "006Aa0000012AbCdEF");
 addDeal.run(northwind, "Fjord Logistics", "ZPA for contractors", 60000,
@@ -257,53 +267,75 @@ const f5 = createVendor(
   "201, 202, 301, 302, 303, 304, 401, 402, XC Accreditation"
 );
 
-const nordvall = Number(
-  addPartner.run(
-    f5,
-    "Nordvall Consulting",
-    "Gold",
-    "Active",
-    "https://se.linkedin.com/in/ted-nordvall",
-    "Nordics",
-    600000,
-    "F5 certified consultancy — deep ADC and security expertise."
-  ).lastInsertRowid
-);
-const ted = Number(
-  addPerson.run(nordvall, "Ted Nordvall", "Technical", "F5 Certified Consultant",
-    "d3vilb0y92@gmail.com", "", "https://se.linkedin.com/in/ted-nordvall",
-    "Active", "", "", "Founder. F5 Certified across the 201–402 track plus XC accreditations."
-  ).lastInsertRowid
-);
-// F5 certification track. Expiries staggered so the dashboard shows a mix of
-// healthy and soon-to-expire (F5 certs are valid two years from passing).
-addCert.run(ted, "201 — TMOS Administration", "Associate", iso(-540), iso(190));
-addCert.run(ted, "202 — Pre-Sales Fundamentals", "Associate", iso(-540), iso(190));
-addCert.run(ted, "301 — LTM Specialist", "Professional", iso(-430), iso(300));
-addCert.run(ted, "302 — DNS Specialist", "Professional", iso(-430), iso(300));
-addCert.run(ted, "303 — ASM Specialist", "Professional", iso(-300), iso(430));
-addCert.run(ted, "304 — APM Specialist", "Professional", iso(-200), iso(530));
-addCert.run(ted, "401 — Security Solution Expert", "Expert", iso(-120), iso(610));
-addCert.run(ted, "402 — Cloud Solution Expert", "Expert", iso(-300), iso(55));
-addCert.run(ted, "XC Accreditation — Distributed Cloud", "Accreditation", iso(-90), iso(640));
+const nordvall = mkPartner(f5, "Nordvall Consulting", "Gold", "Active",
+  "https://se.linkedin.com/in/ted-nordvall", "Nordics", 600000,
+  "F5 certified consultancy — deep ADC and security expertise.");
+const ted = mkPerson(nordvall, "Ted Nordvall", "Technical", "F5 Certified Consultant",
+  "d3vilb0y92@gmail.com", "", "https://se.linkedin.com/in/ted-nordvall", "Active", "", "",
+  "Founder. F5 Certified across the 201–402 track plus XC accreditations.");
+mkCert(ted, f5, "201 — TMOS Administration", "Associate", iso(-540), iso(190));
+mkCert(ted, f5, "202 — Pre-Sales Fundamentals", "Associate", iso(-540), iso(190));
+mkCert(ted, f5, "301 — LTM Specialist", "Professional", iso(-430), iso(300));
+mkCert(ted, f5, "302 — DNS Specialist", "Professional", iso(-430), iso(300));
+mkCert(ted, f5, "303 — ASM Specialist", "Professional", iso(-300), iso(430));
+mkCert(ted, f5, "304 — APM Specialist", "Professional", iso(-200), iso(530));
+mkCert(ted, f5, "401 — Security Solution Expert", "Expert", iso(-120), iso(610));
+mkCert(ted, f5, "402 — Cloud Solution Expert", "Expert", iso(-300), iso(55));
+mkCert(ted, f5, "XC Accreditation — Distributed Cloud", "Accreditation", iso(-90), iso(640));
 addEngagement(nordvall, [ted], "QBR", iso(-12),
   "Reviewed F5 Distributed Cloud opportunities and recert schedule.",
-  "Pipeline, Certifications, Roadmap",
-  "402 recert due in ~2 months — book the exam.");
+  "Pipeline, Certifications, Roadmap", "402 recert due in ~2 months — book the exam.");
 addGoal.run(nordvall, 2026, "Maintain Gold + full cert coverage", "All 201–402 current", 80, "402 recert outstanding");
 addNeed.run(nordvall, "Renew F5 402 (Cloud Solution Expert)", "Expires in ~2 months.", "High", "Open");
 addLicense.run(nordvall, "BIG-IP VE lab", "Lab", "F5-VE-LAB-01", iso(-365), iso(120), "Distributed Cloud + BIG-IP demo lab");
 
 // =====================================================================
-// Vendor 3 — Check Point (empty landscape, ready to populate)
+// Vendor 3 — Check Point (network security)
 // =====================================================================
-createVendor(
+const checkpoint = createVendor(
   "Check Point",
   "Network security & firewalls",
   "CCSA, CCSE, CCSM, CCTE"
 );
 
+// --- Cygates: the SAME company, partnered under both F5 and Check Point. ---
+// Sales/Management entered once below show up under both vendors automatically;
+// each vendor's technical staff and certs are kept separate.
+const cygatesF5 = mkPartner(f5, "Cygates", "Gold", "Active",
+  "https://cygates.example", "Nordics", 900000, "Large Nordic SI — multi-vendor practice.");
+const cygatesCp = mkPartner(checkpoint, "Cygates", "Silver", "Active",
+  "https://cygates.example", "Nordics", 300000, "Same SI, growing its Check Point business.");
+
+// Shared company-wide contacts (added once, under the F5 relationship):
+const lena = mkPerson(cygatesF5, "Lena Svensson", "Sales", "Key Account Manager",
+  "lena@cygates.example", "+46 70 555 1212", "https://linkedin.com/in/lena-svensson-example");
+mkPerson(cygatesF5, "Olof Berg", "Management", "Practice Lead",
+  "olof@cygates.example", "+46 70 555 3434");
+mkCert(lena, f5, "Sales Professional — Security", "Associate", iso(-120), iso(245));
+
+// Technical staff are per vendor — same engineer can work both, but is added
+// (and certified) separately for each.
+const svenF5 = mkPerson(cygatesF5, "Sven Holm", "Technical", "Senior ADC Engineer",
+  "sven@cygates.example", "", "https://linkedin.com/in/sven-holm-example");
+mkCert(svenF5, f5, "301 — LTM Specialist", "Professional", iso(-200), iso(420));
+mkCert(svenF5, f5, "303 — ASM Specialist", "Professional", iso(-150), iso(70));
+const svenCp = mkPerson(cygatesCp, "Sven Holm", "Technical", "Senior Firewall Engineer",
+  "sven@cygates.example", "", "https://linkedin.com/in/sven-holm-example");
+mkCert(svenCp, checkpoint, "CCSE", "Professional", iso(-90), iso(280));
+
+addEngagement(cygatesF5, [lena, svenF5], "QBR", iso(-8),
+  "Cygates joint QBR — F5 Distributed Cloud roadmap and pipeline.",
+  "Pipeline, Roadmap, Certifications");
+addEngagement(cygatesCp, [lena], "Call", iso(-18),
+  "Kicked off Cygates' Check Point ramp — needs a second CCSE.",
+  "Enablement, Certifications");
+addGoal.run(cygatesF5, 2026, "Grow F5 Distributed Cloud revenue", "$1.2M", 55, "");
+addNeed.run(cygatesCp, "Second engineer to CCSE", "One CCSE today — Silver needs three active certs.", "High", "In progress");
+addProblem.run(cygatesCp, "Check Point cert coverage below Silver", "Only 1 active cert, 3 required.", "High", "Open");
+addDeal.run(cygatesF5, "Nordbank", "WAF + Distributed Cloud", 220000,
+  "In progress", "Architecture workshop", iso(-14), "", "");
+
 console.log(
-  "Seeded demo data: 3 vendors (Zscaler, F5, Check Point), 4 partners, " +
-    "9 people, F5 + Zscaler certs, engagements, deals, MDF, licenses, goals."
+  "Seeded demo data: 3 vendors (Zscaler, F5, Check Point), 6 partners across 5 companies " +
+    "(Cygates spans F5 + Check Point), shared Sales/Management, per-vendor technical staff and certs."
 );

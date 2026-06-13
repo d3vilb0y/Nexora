@@ -16,9 +16,16 @@ export type Tier = {
   min_annual_revenue: number;
 };
 
+export type Company = {
+  id: number;
+  name: string;
+  created_at: string;
+};
+
 export type Partner = {
   id: number;
   vendor_id: number;
+  company_id: number;
   name: string;
   tier: string;
   status: string;
@@ -44,6 +51,9 @@ export type Office = {
 export type Person = {
   id: number;
   partner_id: number;
+  company_id: number;
+  /** 1 = shared across every vendor the company is engaged with (Sales/Management). */
+  company_wide: number;
   office_id: number | null;
   name: string;
   role: string;
@@ -61,6 +71,7 @@ export type Person = {
 export type Certification = {
   id: number;
   person_id: number;
+  vendor_id: number;
   name: string;
   level: string;
   issued_date: string;
@@ -158,6 +169,13 @@ export type Problem = {
 };
 
 export const PERSON_ROLES = ["Sales", "Technical", "Management", "Other"];
+/**
+ * Roles that belong to the company as a whole rather than to one vendor
+ * relationship: they auto-appear under every vendor the company is engaged
+ * with. Technical (and Other) staff are added per vendor, since being
+ * technical for one vendor doesn't imply certification on another.
+ */
+export const COMPANY_WIDE_ROLES = ["Sales", "Management"];
 export const ENGAGEMENT_TYPES = [
   "Visit",
   "Lunch/Dinner",

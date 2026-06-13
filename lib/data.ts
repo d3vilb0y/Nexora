@@ -32,17 +32,48 @@ export function listTiers(vendorId: number): Tier[] {
     .all(vendorId) as Tier[];
 }
 
-/** Count certs that still count toward tier requirements: held by active people and not expired. */
-function activeCertCountFor(partnerId: number): number {
+/**
+ * SQL predicate (using named params @pid / @cid) for "this person belongs to
+ * partner @pid": either anchored to that partner directly, or a company-wide
+ * (Sales/Management) person of that partner's company @cid.
+ */
+const PERSON_IN_PARTNER = `(
+  (pe.partner_id = @pid AND pe.company_wide = 0)
+  OR (pe.company_id = @cid AND pe.company_wide = 1)
+)`;
+
+/**
+ * SQL (named param @vendor) for the partner a person maps to within a vendor:
+ * their home partner when anchored, or the company's partner row in that vendor
+ * when company-wide.
+ */
+const EFF_PARTNER_ID = `(CASE WHEN pe.company_wide = 1
+  THEN (SELECT p2.id FROM partners p2 WHERE p2.company_id = pe.company_id AND p2.vendor_id = @vendor)
+  ELSE pe.partner_id END)`;
+
+/** SQL (named param @vendor) for "this person appears in the vendor's landscape". */
+const PERSON_IN_VENDOR = `(
+  (pe.company_wide = 0 AND pe.partner_id IN (SELECT id FROM partners WHERE vendor_id = @vendor))
+  OR (pe.company_wide = 1 AND pe.company_id IN (SELECT company_id FROM partners WHERE vendor_id = @vendor))
+)`;
+
+/** Count certs that count toward tier requirements: vendor-specific, held by active people, not expired. */
+function activeCertCountFor(partner: Partner): number {
   const row = getDb()
     .prepare(
       `SELECT COUNT(*) AS c
-       FROM certifications c
-       JOIN people p ON p.id = c.person_id
-       WHERE p.partner_id = ? AND p.status = 'Active'
-         AND (c.expiry_date = '' OR c.expiry_date >= ?)`
+       FROM certifications cf
+       JOIN people pe ON pe.id = cf.person_id
+       WHERE cf.vendor_id = @vendor AND pe.status = 'Active'
+         AND (cf.expiry_date = '' OR cf.expiry_date >= @today)
+         AND ${PERSON_IN_PARTNER}`
     )
-    .get(partnerId, TODAY()) as { c: number };
+    .get({
+      vendor: partner.vendor_id,
+      today: TODAY(),
+      pid: partner.id,
+      cid: partner.company_id,
+    }) as { c: number };
   return row.c;
 }
 
@@ -78,15 +109,16 @@ export type PartnerSummary = Partner & {
 
 function summarize(partner: Partner, tiers: Tier[]): PartnerSummary {
   const db = getDb();
-  const activeCertCount = activeCertCountFor(partner.id);
+  const activeCertCount = activeCertCountFor(partner);
   const lastEngagement = lastEngagementFor(partner.id);
   const openProblems = openProblemsFor(partner.id);
   const peopleCount = (
     db
       .prepare(
-        "SELECT COUNT(*) AS c FROM people WHERE partner_id = ? AND status = 'Active'"
+        `SELECT COUNT(*) AS c FROM people pe
+         WHERE pe.status = 'Active' AND ${PERSON_IN_PARTNER}`
       )
-      .get(partner.id) as { c: number }
+      .get({ pid: partner.id, cid: partner.company_id }) as { c: number }
   ).c;
   const openNeedCount = (
     db
@@ -140,9 +172,12 @@ export type EngagementRow = Engagement & {
   partner_names: string | null;
 };
 
+export type SiblingPartner = { id: number; vendor_name: string };
+
 export type PartnerDetail = {
   partner: PartnerSummary;
   vendor: Vendor;
+  siblings: SiblingPartner[];
   offices: (Office & { people_count: number })[];
   people: PersonWithCerts[];
   engagements: EngagementRow[];
@@ -180,21 +215,24 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
     .get(partner.vendor_id) as Vendor;
   const tiers = listTiers(partner.vendor_id);
 
+  const peopleParams = { pid: id, cid: partner.company_id };
   const people = db
     .prepare(
-      `SELECT p.*, o.name AS office_name FROM people p
-       LEFT JOIN offices o ON o.id = p.office_id
-       WHERE p.partner_id = ? ORDER BY p.status, p.name COLLATE NOCASE`
+      `SELECT pe.*, o.name AS office_name FROM people pe
+       LEFT JOIN offices o ON o.id = pe.office_id
+       WHERE ${PERSON_IN_PARTNER} ORDER BY pe.status, pe.name COLLATE NOCASE`
     )
-    .all(id) as (Person & { office_name: string | null })[];
+    .all(peopleParams) as (Person & { office_name: string | null })[];
+  // Only this vendor's certs surface here, so a shared person shows the right
+  // ones under each vendor.
   const certsByPerson = db
     .prepare(
-      `SELECT c.* FROM certifications c
-       JOIN people p ON p.id = c.person_id
-       WHERE p.partner_id = ?
-       ORDER BY c.expiry_date`
+      `SELECT cf.* FROM certifications cf
+       JOIN people pe ON pe.id = cf.person_id
+       WHERE cf.vendor_id = @vendor AND ${PERSON_IN_PARTNER}
+       ORDER BY cf.expiry_date`
     )
-    .all(id) as Certification[];
+    .all({ ...peopleParams, vendor: partner.vendor_id }) as Certification[];
 
   const engagements = db
     .prepare(
@@ -214,9 +252,19 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
     0
   );
 
+  const siblings = db
+    .prepare(
+      `SELECT pa.id, v.name AS vendor_name FROM partners pa
+       JOIN vendors v ON v.id = pa.vendor_id
+       WHERE pa.company_id = ? AND pa.id != ?
+       ORDER BY v.name COLLATE NOCASE`
+    )
+    .all(partner.company_id, id) as SiblingPartner[];
+
   return {
     partner: summarize(partner, tiers),
     vendor,
+    siblings,
     offices: db
       .prepare(
         `SELECT o.*, (SELECT COUNT(*) FROM people p WHERE p.office_id = o.id AND p.status = 'Active') AS people_count
@@ -266,6 +314,8 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
 }
 
 export type PersonDirectoryRow = Person & {
+  /** The partner this person maps to within the current vendor (for linking). */
+  eff_partner_id: number;
   partner_name: string;
   office_name: string | null;
   cert_count: number;
@@ -275,18 +325,19 @@ export type PersonDirectoryRow = Person & {
 export function listPeople(vendorId: number): PersonDirectoryRow[] {
   return getDb()
     .prepare(
-      `SELECT p.*, pa.name AS partner_name,
-        (SELECT o.name FROM offices o WHERE o.id = p.office_id) AS office_name,
-        (SELECT COUNT(*) FROM certifications c WHERE c.person_id = p.id) AS cert_count,
+      `SELECT pe.*,
+        ${EFF_PARTNER_ID} AS eff_partner_id,
+        (SELECT c.name FROM companies c WHERE c.id = pe.company_id) AS partner_name,
+        (SELECT o.name FROM offices o WHERE o.id = pe.office_id) AS office_name,
+        (SELECT COUNT(*) FROM certifications cf WHERE cf.person_id = pe.id AND cf.vendor_id = @vendor) AS cert_count,
         (SELECT MAX(e.date) FROM engagements e
          JOIN engagement_attendees ea ON ea.engagement_id = e.id
-         WHERE ea.person_id = p.id) AS last_touch
-       FROM people p
-       JOIN partners pa ON pa.id = p.partner_id
-       WHERE pa.vendor_id = ?
-       ORDER BY p.status, p.name COLLATE NOCASE`
+         WHERE ea.person_id = pe.id) AS last_touch
+       FROM people pe
+       WHERE ${PERSON_IN_VENDOR}
+       ORDER BY pe.status, pe.name COLLATE NOCASE`
     )
-    .all(vendorId) as PersonDirectoryRow[];
+    .all({ vendor: vendorId }) as PersonDirectoryRow[];
 }
 
 export type CertRow = Certification & {
@@ -299,15 +350,15 @@ export type CertRow = Certification & {
 export function listCertifications(vendorId: number): CertRow[] {
   return getDb()
     .prepare(
-      `SELECT c.*, p.name AS person_name, p.status AS person_status,
-              pa.id AS partner_id, pa.name AS partner_name
-       FROM certifications c
-       JOIN people p ON p.id = c.person_id
-       JOIN partners pa ON pa.id = p.partner_id
-       WHERE pa.vendor_id = ?
-       ORDER BY CASE WHEN c.expiry_date = '' THEN 1 ELSE 0 END, c.expiry_date`
+      `SELECT cf.*, pe.name AS person_name, pe.status AS person_status,
+              ${EFF_PARTNER_ID} AS partner_id,
+              (SELECT c.name FROM companies c WHERE c.id = pe.company_id) AS partner_name
+       FROM certifications cf
+       JOIN people pe ON pe.id = cf.person_id
+       WHERE cf.vendor_id = @vendor
+       ORDER BY CASE WHEN cf.expiry_date = '' THEN 1 ELSE 0 END, cf.expiry_date`
     )
-    .all(vendorId) as CertRow[];
+    .all({ vendor: vendorId }) as CertRow[];
 }
 
 export type DashboardData = {
@@ -316,7 +367,7 @@ export type DashboardData = {
   expiringLicenses: (License & { partner_name: string; days: number })[];
   quietPartners: PartnerSummary[];
   tierAtRisk: PartnerSummary[];
-  recentDepartures: (Person & { partner_name: string })[];
+  recentDepartures: (Person & { partner_name: string; eff_partner_id: number })[];
   hotProblems: (Problem & { partner_name: string })[];
 };
 
@@ -359,12 +410,17 @@ export function getDashboard(vendorId: number): DashboardData {
     .slice(0, 10);
   const recentDepartures = db
     .prepare(
-      `SELECT p.*, pa.name AS partner_name FROM people p
-       JOIN partners pa ON pa.id = p.partner_id
-       WHERE pa.vendor_id = ? AND p.status = 'Departed' AND p.departed_at >= ?
-       ORDER BY p.departed_at DESC`
+      `SELECT pe.*,
+        ${EFF_PARTNER_ID} AS eff_partner_id,
+        (SELECT c.name FROM companies c WHERE c.id = pe.company_id) AS partner_name
+       FROM people pe
+       WHERE pe.status = 'Departed' AND pe.departed_at >= @cutoff AND ${PERSON_IN_VENDOR}
+       ORDER BY pe.departed_at DESC`
     )
-    .all(vendorId, cutoff) as (Person & { partner_name: string })[];
+    .all({ vendor: vendorId, cutoff }) as (Person & {
+    partner_name: string;
+    eff_partner_id: number;
+  })[];
 
   const hotProblems = db
     .prepare(
@@ -421,33 +477,36 @@ export function listContactsForExport(options: {
   role: string;
   includeDeparted: boolean;
 }): ExportContact[] {
-  const filters: string[] = ["pa.vendor_id = ?"];
-  const params: (number | string)[] = [options.vendorId];
+  const params: Record<string, unknown> = { vendor: options.vendorId };
+  const filters: string[] = [PERSON_IN_VENDOR];
   if (options.partnerIds.length > 0) {
-    filters.push(
-      `p.partner_id IN (${options.partnerIds.map(() => "?").join(",")})`
-    );
-    params.push(...options.partnerIds);
+    // Limit to the chosen partners, mapping each person to its partner in this vendor.
+    const placeholders = options.partnerIds
+      .map((_, i) => `@p${i}`)
+      .join(",");
+    filters.push(`${EFF_PARTNER_ID} IN (${placeholders})`);
+    options.partnerIds.forEach((id, i) => {
+      params[`p${i}`] = id;
+    });
   }
   if (options.role && options.role !== "All") {
-    filters.push("p.role = ?");
-    params.push(options.role);
+    filters.push("pe.role = @role");
+    params.role = options.role;
   }
   if (!options.includeDeparted) {
-    filters.push("p.status = 'Active'");
+    filters.push("pe.status = 'Active'");
   }
-  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
   return getDb()
     .prepare(
-      `SELECT p.name, p.role, p.title, p.email, p.phone, p.linkedin_url, p.status,
-              pa.name AS partner_name, o.name AS office_name
-       FROM people p
-       JOIN partners pa ON pa.id = p.partner_id
-       LEFT JOIN offices o ON o.id = p.office_id
-       ${where}
-       ORDER BY pa.name COLLATE NOCASE, p.name COLLATE NOCASE`
+      `SELECT pe.name, pe.role, pe.title, pe.email, pe.phone, pe.linkedin_url, pe.status,
+              (SELECT c.name FROM companies c WHERE c.id = pe.company_id) AS partner_name,
+              o.name AS office_name
+       FROM people pe
+       LEFT JOIN offices o ON o.id = pe.office_id
+       WHERE ${filters.join(" AND ")}
+       ORDER BY partner_name COLLATE NOCASE, pe.name COLLATE NOCASE`
     )
-    .all(...params) as ExportContact[];
+    .all(params) as ExportContact[];
 }
 
 export type DealRow = Deal & { partner_name: string };
@@ -489,22 +548,24 @@ export function listLogTargets(vendorId: number): LogTarget[] {
       "SELECT id, name FROM partners WHERE vendor_id = ? ORDER BY name COLLATE NOCASE"
     )
     .all(vendorId) as { id: number; name: string }[];
+  // Each active person mapped to the partner they belong to within this vendor.
   const people = db
     .prepare(
-      `SELECT pe.id, pe.partner_id, pe.name, pe.role FROM people pe
-       JOIN partners pa ON pa.id = pe.partner_id
-       WHERE pa.vendor_id = ? AND pe.status = 'Active' ORDER BY pe.name COLLATE NOCASE`
+      `SELECT pe.id, ${EFF_PARTNER_ID} AS eff_partner_id, pe.name, pe.role
+       FROM people pe
+       WHERE pe.status = 'Active' AND ${PERSON_IN_VENDOR}
+       ORDER BY pe.name COLLATE NOCASE`
     )
-    .all(vendorId) as {
+    .all({ vendor: vendorId }) as {
     id: number;
-    partner_id: number;
+    eff_partner_id: number;
     name: string;
     role: string;
   }[];
   return partners.map((p) => ({
     ...p,
     people: people
-      .filter((person) => person.partner_id === p.id)
+      .filter((person) => person.eff_partner_id === p.id)
       .map(({ id, name, role }) => ({ id, name, role })),
   }));
 }

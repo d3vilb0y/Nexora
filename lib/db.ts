@@ -39,9 +39,16 @@ function migrate(db: Database.Database) {
       UNIQUE (vendor_id, name)
     );
 
+    CREATE TABLE IF NOT EXISTS companies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS partners (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
+      company_id INTEGER REFERENCES companies(id),
       name TEXT NOT NULL,
       tier TEXT NOT NULL DEFAULT 'Authorized',
       status TEXT NOT NULL DEFAULT 'Active',
@@ -67,6 +74,8 @@ function migrate(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS people (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      company_id INTEGER REFERENCES companies(id),
+      company_wide INTEGER NOT NULL DEFAULT 0,
       office_id INTEGER REFERENCES offices(id) ON DELETE SET NULL,
       name TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'Sales',
@@ -84,6 +93,7 @@ function migrate(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS certifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+      vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       level TEXT NOT NULL DEFAULT '',
       issued_date TEXT NOT NULL DEFAULT '',
@@ -237,6 +247,100 @@ function migrate(db: Database.Database) {
   );
 
   migrateToMultiVendor(db, hasColumn);
+  migrateToSharedPeople(db, hasColumn);
+}
+
+/**
+ * People used to belong to exactly one partner (one vendor). A real person
+ * works for a company that can sell several vendors, so:
+ *   - partner rows that are the same company are grouped by a company_id;
+ *   - Sales/Management people are company_wide and surface under every vendor
+ *     the company is engaged with;
+ *   - certifications carry the vendor whose program they belong to, so a
+ *     person can hold (say) F5 and Check Point certs independently.
+ */
+function migrateToSharedPeople(
+  db: Database.Database,
+  hasColumn: (table: string, column: string) => boolean
+) {
+  // On a fresh database the columns already exist (created above); the ALTERs
+  // only fire when upgrading an older single-vendor-per-person database.
+  const peopleNeedFlagging = !hasColumn("people", "company_id");
+  if (!hasColumn("partners", "company_id")) {
+    db.exec("ALTER TABLE partners ADD COLUMN company_id INTEGER REFERENCES companies(id)");
+  }
+  if (!hasColumn("people", "company_id")) {
+    db.exec("ALTER TABLE people ADD COLUMN company_id INTEGER REFERENCES companies(id)");
+  }
+  if (!hasColumn("people", "company_wide")) {
+    db.exec("ALTER TABLE people ADD COLUMN company_wide INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!hasColumn("certifications", "vendor_id")) {
+    db.exec("ALTER TABLE certifications ADD COLUMN vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE");
+  }
+
+  // Give every partner a company, sharing one company across partner rows that
+  // carry the same name (case-insensitive) — that's how the same firm under
+  // two vendors gets linked.
+  const orphanPartners = db
+    .prepare("SELECT id, name FROM partners WHERE company_id IS NULL")
+    .all() as { id: number; name: string }[];
+  if (orphanPartners.length > 0) {
+    const findCompany = db.prepare(
+      "SELECT id FROM companies WHERE name = ? COLLATE NOCASE"
+    );
+    const insertCompany = db.prepare("INSERT INTO companies (name) VALUES (?)");
+    const setPartnerCompany = db.prepare(
+      "UPDATE partners SET company_id = ? WHERE id = ?"
+    );
+    for (const p of orphanPartners) {
+      const existing = findCompany.get(p.name) as { id: number } | undefined;
+      const companyId =
+        existing?.id ?? Number(insertCompany.run(p.name).lastInsertRowid);
+      setPartnerCompany.run(companyId, p.id);
+    }
+  }
+
+  // People inherit their (home) partner's company; legacy certs inherit the
+  // vendor of the person's home partner.
+  db.exec(
+    `UPDATE people SET company_id = (
+       SELECT company_id FROM partners WHERE partners.id = people.partner_id
+     ) WHERE company_id IS NULL`
+  );
+  db.exec(
+    `UPDATE certifications SET vendor_id = (
+       SELECT pa.vendor_id FROM people pe
+       JOIN partners pa ON pa.id = pe.partner_id
+       WHERE pe.id = certifications.person_id
+     ) WHERE vendor_id IS NULL`
+  );
+
+  // First upgrade only: existing Sales/Management become company-wide so they
+  // follow the company into any newly added vendor.
+  if (peopleNeedFlagging) {
+    db.exec(
+      "UPDATE people SET company_wide = 1 WHERE role IN ('Sales', 'Management')"
+    );
+  }
+
+  db.exec("CREATE INDEX IF NOT EXISTS idx_partners_company ON partners(company_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_people_company ON people(company_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_certs_vendor ON certifications(vendor_id)");
+}
+
+/** Find an existing company by name (case-insensitive) or create one. */
+export function resolveCompanyId(
+  db: Database.Database,
+  name: string
+): number {
+  const existing = db
+    .prepare("SELECT id FROM companies WHERE name = ? COLLATE NOCASE")
+    .get(name) as { id: number } | undefined;
+  if (existing) return existing.id;
+  return Number(
+    db.prepare("INSERT INTO companies (name) VALUES (?)").run(name).lastInsertRowid
+  );
 }
 
 /**

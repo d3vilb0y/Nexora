@@ -195,6 +195,14 @@ function PersonRow({
         </span>
         <span className="font-semibold">{person.name}</span>
         <Badge value={person.role} />
+        {person.company_wide === 1 && (
+          <span
+            className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700"
+            title="Sales/Management — shared across every vendor this company works with"
+          >
+            shared
+          </span>
+        )}
         {person.office_name && (
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
             {person.office_name}
@@ -296,7 +304,7 @@ function PersonRow({
               </div>
             </form>
           </AddFormInline>
-          {offices.length > 0 && person.status === "Active" && (
+          {offices.length > 0 && person.status === "Active" && !person.company_wide && (
             <form action={setPersonOffice} className="flex items-center gap-1 text-xs">
               <HiddenIds partnerId={partner.id} id={person.id} />
               <select
@@ -432,6 +440,13 @@ export function PeopleSection({ detail }: { detail: PartnerDetail }) {
             <Field label="Notes">
               <textarea name="notes" rows={2} className={inputCls} />
             </Field>
+          </div>
+          <div className="md:col-span-3">
+            <p className="text-xs text-slate-500">
+              Sales &amp; Management are added once for the company and appear
+              under every vendor it works with. Technical staff are specific to
+              this vendor relationship.
+            </p>
           </div>
           <div>
             <button type="submit" className={btnCls}>

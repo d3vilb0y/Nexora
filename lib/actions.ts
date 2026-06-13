@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { ensureVendorTiers, getDb } from "./db";
+import { ensureVendorTiers, getDb, resolveCompanyId } from "./db";
 import { getActiveVendorId, VENDOR_COOKIE } from "./vendor";
+import { COMPANY_WIDE_ROLES } from "./types";
 import {
   fetchSalesforceDeals,
   importDeals,
@@ -116,14 +117,20 @@ export async function deleteVendor(form: FormData) {
 
 export async function createPartner(form: FormData) {
   const vendorId = await getActiveVendorId();
-  const result = getDb()
+  const db = getDb();
+  const name = reqStr(form, "name");
+  // Same company name (in any vendor) → same company, so its Sales/Management
+  // people follow it into this vendor automatically.
+  const companyId = resolveCompanyId(db, name);
+  const result = db
     .prepare(
-      `INSERT INTO partners (vendor_id, name, tier, status, website, region, annual_revenue, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO partners (vendor_id, company_id, name, tier, status, website, region, annual_revenue, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       vendorId,
-      reqStr(form, "name"),
+      companyId,
+      name,
       str(form, "tier") || "Authorized",
       str(form, "status") || "Active",
       str(form, "website"),
@@ -156,8 +163,26 @@ export async function updatePartner(form: FormData) {
 }
 
 export async function deletePartner(form: FormData) {
+  const db = getDb();
   const id = num(form, "id");
-  getDb().prepare("DELETE FROM partners WHERE id = ?").run(id);
+  const partner = db
+    .prepare("SELECT company_id FROM partners WHERE id = ?")
+    .get(id) as { company_id: number } | undefined;
+  // Company-wide people homed at this partner must survive if the company is
+  // still engaged with other vendors — re-home them to a sibling partner.
+  if (partner) {
+    const sibling = db
+      .prepare(
+        "SELECT id FROM partners WHERE company_id = ? AND id != ? LIMIT 1"
+      )
+      .get(partner.company_id, id) as { id: number } | undefined;
+    if (sibling) {
+      db.prepare(
+        "UPDATE people SET partner_id = ? WHERE partner_id = ? AND company_wide = 1"
+      ).run(sibling.id, id);
+    }
+  }
+  db.prepare("DELETE FROM partners WHERE id = ?").run(id);
   revalidatePartner(id);
   redirect("/partners");
 }
@@ -190,18 +215,29 @@ export async function deleteOffice(form: FormData) {
 // --- People ---
 
 export async function createPerson(form: FormData) {
+  const db = getDb();
   const partnerId = num(form, "partner_id");
   const officeId = num(form, "office_id");
-  getDb()
+  const role = str(form, "role") || "Sales";
+  // Sales/Management belong to the whole company (visible under every vendor it
+  // works with); Technical/Other are anchored to this one vendor relationship.
+  const companyWide = COMPANY_WIDE_ROLES.includes(role) ? 1 : 0;
+  const partner = db
+    .prepare("SELECT company_id FROM partners WHERE id = ?")
+    .get(partnerId) as { company_id: number } | undefined;
+  db
     .prepare(
-      `INSERT INTO people (partner_id, office_id, name, role, title, email, phone, linkedin_url, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO people (partner_id, company_id, company_wide, office_id, name, role, title, email, phone, linkedin_url, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       partnerId,
-      officeId > 0 ? officeId : null,
+      partner?.company_id ?? null,
+      companyWide,
+      // A company-wide person isn't tied to one vendor's office.
+      !companyWide && officeId > 0 ? officeId : null,
       reqStr(form, "name"),
-      str(form, "role") || "Sales",
+      role,
       str(form, "title"),
       str(form, "email"),
       str(form, "phone"),
@@ -252,20 +288,28 @@ export async function deletePerson(form: FormData) {
 // --- Certifications ---
 
 export async function createCertification(form: FormData) {
-  getDb()
+  const db = getDb();
+  const partnerId = num(form, "partner_id");
+  // The cert belongs to the program of whichever vendor we're adding it under,
+  // so a shared person can hold (e.g.) F5 and Check Point certs side by side.
+  const partner = db
+    .prepare("SELECT vendor_id FROM partners WHERE id = ?")
+    .get(partnerId) as { vendor_id: number } | undefined;
+  db
     .prepare(
-      `INSERT INTO certifications (person_id, name, level, issued_date, expiry_date, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO certifications (person_id, vendor_id, name, level, issued_date, expiry_date, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       num(form, "person_id"),
+      partner?.vendor_id ?? null,
       reqStr(form, "name"),
       str(form, "level"),
       str(form, "issued_date"),
       str(form, "expiry_date"),
       str(form, "notes")
     );
-  revalidatePartner(num(form, "partner_id"));
+  revalidatePartner(partnerId);
 }
 
 export async function deleteCertification(form: FormData) {
