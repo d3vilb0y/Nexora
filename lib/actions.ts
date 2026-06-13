@@ -4,7 +4,14 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ensureVendorTiers, getDb, resolveCompanyId } from "./db";
-import { getActiveVendorId, VENDOR_COOKIE } from "./vendor";
+import { getActiveVendorId, getVendor, VENDOR_COOKIE } from "./vendor";
+import { getDashboard } from "./data";
+import {
+  buildDigestCard,
+  buildTestCard,
+  isTeamsConfigured,
+  postToTeams,
+} from "./teams";
 import { COMPANY_WIDE_ROLES } from "./types";
 import {
   fetchSalesforceDeals,
@@ -82,17 +89,65 @@ export async function createVendor(form: FormData) {
 export async function updateVendor(form: FormData) {
   getDb()
     .prepare(
-      "UPDATE vendors SET name = ?, description = ?, cert_catalog = ?, status = ? WHERE id = ?"
+      "UPDATE vendors SET name = ?, description = ?, cert_catalog = ?, teams_webhook_url = ?, status = ? WHERE id = ?"
     )
     .run(
       reqStr(form, "name"),
       str(form, "description"),
       str(form, "cert_catalog"),
+      str(form, "teams_webhook_url"),
       str(form, "status") || "Active",
       num(form, "id")
     );
   revalidatePath("/", "layout");
   revalidatePath("/admin");
+}
+
+// --- Microsoft Teams integration (optional, per vendor) ---
+
+function adminRedirect(params: Record<string, string>): never {
+  redirect(`/admin?${new URLSearchParams(params).toString()}`);
+}
+
+/** Send a "connected" test card to the vendor's configured Teams channel. */
+export async function sendTeamsTest(form: FormData) {
+  const vendor = getVendor(num(form, "vendor_id"));
+  if (!vendor) adminRedirect({ error: "Vendor not found." });
+  if (!isTeamsConfigured(vendor)) {
+    adminRedirect({
+      error: `Save an https Teams webhook URL for ${vendor.name} first.`,
+    });
+  }
+  const result = await postToTeams(
+    vendor.teams_webhook_url,
+    buildTestCard(vendor)
+  );
+  adminRedirect(
+    result.ok
+      ? { notice: `Test message sent to ${vendor.name}'s Teams channel.` }
+      : { error: `Couldn't reach Teams: ${result.error}` }
+  );
+}
+
+/** Push the current partner-health digest to the vendor's Teams channel. */
+export async function sendTeamsDigest(form: FormData) {
+  const vendor = getVendor(num(form, "vendor_id"));
+  if (!vendor) adminRedirect({ error: "Vendor not found." });
+  if (!isTeamsConfigured(vendor)) {
+    adminRedirect({
+      error: `Save an https Teams webhook URL for ${vendor.name} first.`,
+    });
+  }
+  const data = getDashboard(vendor.id);
+  const result = await postToTeams(
+    vendor.teams_webhook_url,
+    buildDigestCard(vendor, data)
+  );
+  adminRedirect(
+    result.ok
+      ? { notice: `Digest posted to ${vendor.name}'s Teams channel.` }
+      : { error: `Couldn't reach Teams: ${result.error}` }
+  );
 }
 
 export async function deleteVendor(form: FormData) {

@@ -3,6 +3,8 @@ export type Vendor = {
   name: string;
   description: string;
   cert_catalog: string;
+  /** Microsoft Teams "Workflows" incoming-webhook URL; empty = integration off. */
+  teams_webhook_url: string;
   status: string;
   created_at: string;
 };

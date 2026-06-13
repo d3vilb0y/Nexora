@@ -1,6 +1,8 @@
 import {
   createVendor,
   deleteVendor,
+  sendTeamsDigest,
+  sendTeamsTest,
   setActiveVendor,
   updateVendor,
 } from "@/lib/actions";
@@ -21,9 +23,9 @@ export const dynamic = "force-dynamic";
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, notice } = await searchParams;
   const vendors = listVendorsWithStats();
   const activeId = await getActiveVendorId();
 
@@ -42,6 +44,11 @@ export default async function AdminPage({
       {error && (
         <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {notice}
         </div>
       )}
 
@@ -124,12 +131,68 @@ export default async function AdminPage({
                       />
                     </Field>
                   </div>
+                  <div className="md:col-span-2">
+                    <Field label="Microsoft Teams webhook URL (optional)">
+                      <input
+                        name="teams_webhook_url"
+                        type="url"
+                        defaultValue={v.teams_webhook_url}
+                        className={inputCls}
+                        placeholder="https://prod-…logic.azure.com/workflows/…"
+                      />
+                    </Field>
+                    <p className="mt-1 text-xs text-slate-500">
+                      In Teams, add a <span className="font-medium">Workflow</span>{" "}
+                      to the target channel from the{" "}
+                      <span className="font-medium">
+                        &ldquo;Post to a channel when a webhook request is
+                        received&rdquo;
+                      </span>{" "}
+                      template, then paste the URL it generates here. Leave blank
+                      to keep the integration off. Save before sending.
+                    </p>
+                  </div>
                   <div className="flex items-center gap-4 md:col-span-2">
                     <button type="submit" className={btnCls}>
                       Save
                     </button>
                   </div>
                 </form>
+
+                <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+                  <span className="text-xs font-medium text-slate-500">
+                    Teams:
+                  </span>
+                  {v.teams_webhook_url ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                      connected
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+                      not configured
+                    </span>
+                  )}
+                  <form action={sendTeamsTest}>
+                    <input type="hidden" name="vendor_id" value={v.id} />
+                    <button
+                      type="submit"
+                      disabled={!v.teams_webhook_url}
+                      className="text-xs font-medium text-sky-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline"
+                    >
+                      Send test
+                    </button>
+                  </form>
+                  <form action={sendTeamsDigest}>
+                    <input type="hidden" name="vendor_id" value={v.id} />
+                    <button
+                      type="submit"
+                      disabled={!v.teams_webhook_url}
+                      className="text-xs font-medium text-sky-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline"
+                    >
+                      Send digest now
+                    </button>
+                  </form>
+                </div>
 
                 <form
                   action={deleteVendor}

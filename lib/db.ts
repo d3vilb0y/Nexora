@@ -25,6 +25,7 @@ function migrate(db: Database.Database) {
       name TEXT NOT NULL UNIQUE,
       description TEXT NOT NULL DEFAULT '',
       cert_catalog TEXT NOT NULL DEFAULT '',
+      teams_webhook_url TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'Active',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -245,6 +246,9 @@ function migrate(db: Database.Database) {
   }
   if (!hasColumn("deals", "salesforce_id")) {
     db.exec("ALTER TABLE deals ADD COLUMN salesforce_id TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn("vendors", "teams_webhook_url")) {
+    db.exec("ALTER TABLE vendors ADD COLUMN teams_webhook_url TEXT NOT NULL DEFAULT ''");
   }
   db.exec(
     `INSERT OR IGNORE INTO engagement_attendees (engagement_id, person_id)
