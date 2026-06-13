@@ -21,14 +21,15 @@ import type {
   Person,
   Problem,
   Tier,
+  Vendor,
 } from "./types";
 
 const TODAY = () => new Date().toISOString().slice(0, 10);
 
-export function listTiers(): Tier[] {
+export function listTiers(vendorId: number): Tier[] {
   return getDb()
-    .prepare("SELECT * FROM tiers ORDER BY rank")
-    .all() as Tier[];
+    .prepare("SELECT * FROM tiers WHERE vendor_id = ? ORDER BY rank")
+    .all(vendorId) as Tier[];
 }
 
 /** Count certs that still count toward tier requirements: held by active people and not expired. */
@@ -119,11 +120,13 @@ function summarize(partner: Partner, tiers: Tier[]): PartnerSummary {
   };
 }
 
-export function listPartners(): PartnerSummary[] {
-  const tiers = listTiers();
+export function listPartners(vendorId: number): PartnerSummary[] {
+  const tiers = listTiers(vendorId);
   const partners = getDb()
-    .prepare("SELECT * FROM partners ORDER BY name COLLATE NOCASE")
-    .all() as Partner[];
+    .prepare(
+      "SELECT * FROM partners WHERE vendor_id = ? ORDER BY name COLLATE NOCASE"
+    )
+    .all(vendorId) as Partner[];
   return partners.map((p) => summarize(p, tiers));
 }
 
@@ -139,6 +142,7 @@ export type EngagementRow = Engagement & {
 
 export type PartnerDetail = {
   partner: PartnerSummary;
+  vendor: Vendor;
   offices: (Office & { people_count: number })[];
   people: PersonWithCerts[];
   engagements: EngagementRow[];
@@ -171,7 +175,10 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
     .prepare("SELECT * FROM partners WHERE id = ?")
     .get(id) as Partner | undefined;
   if (!partner) return null;
-  const tiers = listTiers();
+  const vendor = db
+    .prepare("SELECT * FROM vendors WHERE id = ?")
+    .get(partner.vendor_id) as Vendor;
+  const tiers = listTiers(partner.vendor_id);
 
   const people = db
     .prepare(
@@ -209,6 +216,7 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
 
   return {
     partner: summarize(partner, tiers),
+    vendor,
     offices: db
       .prepare(
         `SELECT o.*, (SELECT COUNT(*) FROM people p WHERE p.office_id = o.id AND p.status = 'Active') AS people_count
@@ -264,7 +272,7 @@ export type PersonDirectoryRow = Person & {
   last_touch: string | null;
 };
 
-export function listPeople(): PersonDirectoryRow[] {
+export function listPeople(vendorId: number): PersonDirectoryRow[] {
   return getDb()
     .prepare(
       `SELECT p.*, pa.name AS partner_name,
@@ -275,9 +283,10 @@ export function listPeople(): PersonDirectoryRow[] {
          WHERE ea.person_id = p.id) AS last_touch
        FROM people p
        JOIN partners pa ON pa.id = p.partner_id
+       WHERE pa.vendor_id = ?
        ORDER BY p.status, p.name COLLATE NOCASE`
     )
-    .all() as PersonDirectoryRow[];
+    .all(vendorId) as PersonDirectoryRow[];
 }
 
 export type CertRow = Certification & {
@@ -287,7 +296,7 @@ export type CertRow = Certification & {
   partner_name: string;
 };
 
-export function listCertifications(): CertRow[] {
+export function listCertifications(vendorId: number): CertRow[] {
   return getDb()
     .prepare(
       `SELECT c.*, p.name AS person_name, p.status AS person_status,
@@ -295,9 +304,10 @@ export function listCertifications(): CertRow[] {
        FROM certifications c
        JOIN people p ON p.id = c.person_id
        JOIN partners pa ON pa.id = p.partner_id
+       WHERE pa.vendor_id = ?
        ORDER BY CASE WHEN c.expiry_date = '' THEN 1 ELSE 0 END, c.expiry_date`
     )
-    .all() as CertRow[];
+    .all(vendorId) as CertRow[];
 }
 
 export type DashboardData = {
@@ -310,11 +320,11 @@ export type DashboardData = {
   hotProblems: (Problem & { partner_name: string })[];
 };
 
-export function getDashboard(): DashboardData {
+export function getDashboard(vendorId: number): DashboardData {
   const db = getDb();
-  const partners = listPartners();
+  const partners = listPartners(vendorId);
 
-  const expiringCerts = listCertifications()
+  const expiringCerts = listCertifications(vendorId)
     .filter((c) => c.person_status === "Active")
     .map((c) => ({ ...c, days: certStatus(c.expiry_date).days }))
     .filter(
@@ -327,9 +337,9 @@ export function getDashboard(): DashboardData {
       .prepare(
         `SELECT l.*, pa.name AS partner_name FROM licenses l
          JOIN partners pa ON pa.id = l.partner_id
-         WHERE l.expiry_date != '' ORDER BY l.expiry_date`
+         WHERE pa.vendor_id = ? AND l.expiry_date != '' ORDER BY l.expiry_date`
       )
-      .all() as (License & { partner_name: string })[]
+      .all(vendorId) as (License & { partner_name: string })[]
   )
     .map((l) => ({ ...l, days: certStatus(l.expiry_date).days as number }))
     .filter((l) => l.days !== null && l.days <= 60);
@@ -351,19 +361,19 @@ export function getDashboard(): DashboardData {
     .prepare(
       `SELECT p.*, pa.name AS partner_name FROM people p
        JOIN partners pa ON pa.id = p.partner_id
-       WHERE p.status = 'Departed' AND p.departed_at >= ?
+       WHERE pa.vendor_id = ? AND p.status = 'Departed' AND p.departed_at >= ?
        ORDER BY p.departed_at DESC`
     )
-    .all(cutoff) as (Person & { partner_name: string })[];
+    .all(vendorId, cutoff) as (Person & { partner_name: string })[];
 
   const hotProblems = db
     .prepare(
       `SELECT pr.*, pa.name AS partner_name FROM problems pr
        JOIN partners pa ON pa.id = pr.partner_id
-       WHERE pr.status != 'Resolved' AND pr.severity IN ('High','Critical')
+       WHERE pa.vendor_id = ? AND pr.status != 'Resolved' AND pr.severity IN ('High','Critical')
        ORDER BY CASE pr.severity WHEN 'Critical' THEN 0 ELSE 1 END, pr.created_at DESC`
     )
-    .all() as (Problem & { partner_name: string })[];
+    .all(vendorId) as (Problem & { partner_name: string })[];
 
   return {
     partners,
@@ -378,15 +388,19 @@ export function getDashboard(): DashboardData {
 
 export type FeedEngagement = EngagementRow & { partner_name: string };
 
-export function listRecentEngagements(limit = 25): FeedEngagement[] {
+export function listRecentEngagements(
+  vendorId: number,
+  limit = 25
+): FeedEngagement[] {
   return getDb()
     .prepare(
       `SELECT e.*, pa.name AS partner_name, ${ATTENDEES_SUBQUERY}, ${PARTNERS_SUBQUERY}
        FROM engagements e
        JOIN partners pa ON pa.id = e.partner_id
+       WHERE pa.vendor_id = ?
        ORDER BY e.date DESC, e.id DESC LIMIT ?`
     )
-    .all(limit) as FeedEngagement[];
+    .all(vendorId, limit) as FeedEngagement[];
 }
 
 export type ExportContact = {
@@ -402,12 +416,13 @@ export type ExportContact = {
 };
 
 export function listContactsForExport(options: {
+  vendorId: number;
   partnerIds: number[];
   role: string;
   includeDeparted: boolean;
 }): ExportContact[] {
-  const filters: string[] = [];
-  const params: (number | string)[] = [];
+  const filters: string[] = ["pa.vendor_id = ?"];
+  const params: (number | string)[] = [options.vendorId];
   if (options.partnerIds.length > 0) {
     filters.push(
       `p.partner_id IN (${options.partnerIds.map(() => "?").join(",")})`
@@ -437,26 +452,27 @@ export function listContactsForExport(options: {
 
 export type DealRow = Deal & { partner_name: string };
 
-export function listDeals(): DealRow[] {
+export function listDeals(vendorId: number): DealRow[] {
   return getDb()
     .prepare(
       `SELECT d.*, pa.name AS partner_name FROM deals d
        JOIN partners pa ON pa.id = d.partner_id
+       WHERE pa.vendor_id = ?
        ORDER BY CASE WHEN d.stage IN ('Won','Lost') THEN 1 ELSE 0 END,
                 d.registered_date DESC, d.id DESC`
     )
-    .all() as DealRow[];
+    .all(vendorId) as DealRow[];
 }
 
-export function listOpenDeals(): DealRow[] {
+export function listOpenDeals(vendorId: number): DealRow[] {
   return getDb()
     .prepare(
       `SELECT d.*, pa.name AS partner_name FROM deals d
        JOIN partners pa ON pa.id = d.partner_id
-       WHERE d.stage NOT IN ('Won','Lost')
+       WHERE pa.vendor_id = ? AND d.stage NOT IN ('Won','Lost')
        ORDER BY d.value DESC`
     )
-    .all() as DealRow[];
+    .all(vendorId) as DealRow[];
 }
 
 /** Partner names plus their active people, for the quick engagement logger. */
@@ -466,17 +482,25 @@ export type LogTarget = {
   people: { id: number; name: string; role: string }[];
 };
 
-export function listLogTargets(): LogTarget[] {
+export function listLogTargets(vendorId: number): LogTarget[] {
   const db = getDb();
   const partners = db
-    .prepare("SELECT id, name FROM partners ORDER BY name COLLATE NOCASE")
-    .all() as { id: number; name: string }[];
+    .prepare(
+      "SELECT id, name FROM partners WHERE vendor_id = ? ORDER BY name COLLATE NOCASE"
+    )
+    .all(vendorId) as { id: number; name: string }[];
   const people = db
     .prepare(
-      `SELECT id, partner_id, name, role FROM people
-       WHERE status = 'Active' ORDER BY name COLLATE NOCASE`
+      `SELECT pe.id, pe.partner_id, pe.name, pe.role FROM people pe
+       JOIN partners pa ON pa.id = pe.partner_id
+       WHERE pa.vendor_id = ? AND pe.status = 'Active' ORDER BY pe.name COLLATE NOCASE`
     )
-    .all() as { id: number; partner_id: number; name: string; role: string }[];
+    .all(vendorId) as {
+    id: number;
+    partner_id: number;
+    name: string;
+    role: string;
+  }[];
   return partners.map((p) => ({
     ...p,
     people: people

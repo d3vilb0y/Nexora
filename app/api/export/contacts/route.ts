@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { toCsv } from "@/lib/csv";
 import { listContactsForExport } from "@/lib/data";
+import { getActiveVendorId } from "@/lib/vendor";
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -11,8 +12,14 @@ export async function GET(request: NextRequest) {
   const role = params.get("role") || "All";
   const includeDeparted = params.get("departed") === "1";
   const format = params.get("format") === "emails" ? "emails" : "csv";
+  const vendorId = await getActiveVendorId();
 
-  const contacts = listContactsForExport({ partnerIds, role, includeDeparted });
+  const contacts = listContactsForExport({
+    vendorId,
+    partnerIds,
+    role,
+    includeDeparted,
+  });
 
   if (format === "emails") {
     const lines = contacts

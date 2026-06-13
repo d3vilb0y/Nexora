@@ -1,8 +1,12 @@
 /**
  * Seeds the database with demo data so every dashboard panel has content.
  * Run with: npm run seed   (wipes existing data first)
+ *
+ * The data spans several vendors (tillverkare) to show off the multi-brand
+ * switching: a populated Zscaler landscape, an F5 landscape with Ted Nordvall's
+ * certifications, and an empty Check Point landscape ready to fill in.
  */
-import { getDb } from "../lib/db.ts";
+import { ensureVendorTiers, getDb } from "../lib/db.ts";
 
 const db = getDb();
 
@@ -14,12 +18,27 @@ db.exec(`
   DELETE FROM business_goals; DELETE FROM licenses; DELETE FROM mdf_entries;
   DELETE FROM deals; DELETE FROM engagement_partners; DELETE FROM engagement_attendees;
   DELETE FROM engagements; DELETE FROM certifications; DELETE FROM people;
-  DELETE FROM offices; DELETE FROM partners;
+  DELETE FROM offices; DELETE FROM partners; DELETE FROM tiers; DELETE FROM vendors;
 `);
 
+const addVendor = db.prepare(
+  `INSERT INTO vendors (name, description, cert_catalog, status) VALUES (?, ?, ?, ?)`
+);
+function createVendor(
+  name: string,
+  description: string,
+  certCatalog: string
+): number {
+  const id = Number(
+    addVendor.run(name, description, certCatalog, "Active").lastInsertRowid
+  );
+  ensureVendorTiers(db, id);
+  return id;
+}
+
 const addPartner = db.prepare(
-  `INSERT INTO partners (name, tier, status, website, region, annual_revenue, notes)
-   VALUES (?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO partners (vendor_id, name, tier, status, website, region, annual_revenue, notes)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const addOffice = db.prepare(
   `INSERT INTO offices (partner_id, name, region, address) VALUES (?, ?, ?, ?)`
@@ -83,9 +102,19 @@ const addProblem = db.prepare(
   `INSERT INTO problems (partner_id, title, description, severity, status) VALUES (?, ?, ?, ?, ?)`
 );
 
+// =====================================================================
+// Vendor 1 — Zscaler (the populated SSE partner landscape)
+// =====================================================================
+const zscaler = createVendor(
+  "Zscaler",
+  "Security Service Edge — ZIA / ZPA / ZDX",
+  "ZIA, ZPA, ZDX, Sales Foundation, SSE Delivery"
+);
+
 // --- Northwind Secure (Gold, healthy but a cert is expiring soon) ---
 const northwind = Number(
   addPartner.run(
+    zscaler,
     "Northwind Secure",
     "Gold",
     "Active",
@@ -152,6 +181,7 @@ addProblem.run(northwind, "Backfill for departed engineer", "David's departure l
 // --- Apex Networks (Silver, tier at risk: too few active certs) ---
 const apex = Number(
   addPartner.run(
+    zscaler,
     "Apex Networks", "Silver", "Active", "https://apexnetworks.example",
     "DACH", 140000, "Ambitious, wants Gold next year."
   ).lastInsertRowid
@@ -187,6 +217,7 @@ addProblem.run(apex, "Cert coverage below Silver requirement", "Only 2 active ce
 // --- Meridian IT (Authorized, gone quiet) ---
 const meridian = Number(
   addPartner.run(
+    zscaler,
     "Meridian IT", "Authorized", "Active", "https://meridianit.example",
     "Benelux", 30000, "Transactional partner, little engagement lately."
   ).lastInsertRowid
@@ -202,7 +233,7 @@ addNeed.run(meridian, "Re-engagement plan", "No touchpoint in three months.", "M
 addProblem.run(meridian, "Unresponsive to outreach", "Risk of partner churn.", "Critical", "Open");
 addCompetitor.run(meridian, "Zscaler", "Also resells us via a distributor — and pitches Palo Alto");
 
-// Joint training across all three partners
+// Joint training across all three Zscaler partners
 addEngagement([northwind, apex, meridian], [anna, cecilia, markus, piet],
   "Enablement session", iso(-3),
   "Regional partner training day — SSE deep dive for three partners.",
@@ -217,4 +248,62 @@ addDeal.run(northwind, "Fjord Logistics", "ZPA for contractors", 60000,
 addDeal.run(apex, "Bayern Manufacturing", "Zero trust pilot", 45000,
   "Registered", "Requested SE support for PoC", iso(-7), "", "");
 
-console.log("Seeded demo data: 3 partners, 8 people, certs, engagements, deals, MDF, licenses, goals.");
+// =====================================================================
+// Vendor 2 — F5 (Ted Nordvall's certified landscape)
+// =====================================================================
+const f5 = createVendor(
+  "F5",
+  "Application security & delivery (BIG-IP, NGINX, Distributed Cloud)",
+  "201, 202, 301, 302, 303, 304, 401, 402, XC Accreditation"
+);
+
+const nordvall = Number(
+  addPartner.run(
+    f5,
+    "Nordvall Consulting",
+    "Gold",
+    "Active",
+    "https://se.linkedin.com/in/ted-nordvall",
+    "Nordics",
+    600000,
+    "F5 certified consultancy — deep ADC and security expertise."
+  ).lastInsertRowid
+);
+const ted = Number(
+  addPerson.run(nordvall, "Ted Nordvall", "Technical", "F5 Certified Consultant",
+    "d3vilb0y92@gmail.com", "", "https://se.linkedin.com/in/ted-nordvall",
+    "Active", "", "", "Founder. F5 Certified across the 201–402 track plus XC accreditations."
+  ).lastInsertRowid
+);
+// F5 certification track. Expiries staggered so the dashboard shows a mix of
+// healthy and soon-to-expire (F5 certs are valid two years from passing).
+addCert.run(ted, "201 — TMOS Administration", "Associate", iso(-540), iso(190));
+addCert.run(ted, "202 — Pre-Sales Fundamentals", "Associate", iso(-540), iso(190));
+addCert.run(ted, "301 — LTM Specialist", "Professional", iso(-430), iso(300));
+addCert.run(ted, "302 — DNS Specialist", "Professional", iso(-430), iso(300));
+addCert.run(ted, "303 — ASM Specialist", "Professional", iso(-300), iso(430));
+addCert.run(ted, "304 — APM Specialist", "Professional", iso(-200), iso(530));
+addCert.run(ted, "401 — Security Solution Expert", "Expert", iso(-120), iso(610));
+addCert.run(ted, "402 — Cloud Solution Expert", "Expert", iso(-300), iso(55));
+addCert.run(ted, "XC Accreditation — Distributed Cloud", "Accreditation", iso(-90), iso(640));
+addEngagement(nordvall, [ted], "QBR", iso(-12),
+  "Reviewed F5 Distributed Cloud opportunities and recert schedule.",
+  "Pipeline, Certifications, Roadmap",
+  "402 recert due in ~2 months — book the exam.");
+addGoal.run(nordvall, 2026, "Maintain Gold + full cert coverage", "All 201–402 current", 80, "402 recert outstanding");
+addNeed.run(nordvall, "Renew F5 402 (Cloud Solution Expert)", "Expires in ~2 months.", "High", "Open");
+addLicense.run(nordvall, "BIG-IP VE lab", "Lab", "F5-VE-LAB-01", iso(-365), iso(120), "Distributed Cloud + BIG-IP demo lab");
+
+// =====================================================================
+// Vendor 3 — Check Point (empty landscape, ready to populate)
+// =====================================================================
+createVendor(
+  "Check Point",
+  "Network security & firewalls",
+  "CCSA, CCSE, CCSM, CCTE"
+);
+
+console.log(
+  "Seeded demo data: 3 vendors (Zscaler, F5, Check Point), 4 partners, " +
+    "9 people, F5 + Zscaler certs, engagements, deals, MDF, licenses, goals."
+);

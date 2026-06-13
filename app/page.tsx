@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { getDashboard, listOpenDeals } from "@/lib/data";
+import { getActiveVendorId } from "@/lib/vendor";
 import { formatMoney } from "@/lib/health";
 import { Badge, Card, Empty, HealthBadge, PartnerLink } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function DashboardPage() {
-  const data = getDashboard();
-  const openDeals = listOpenDeals();
+export default async function DashboardPage() {
+  const vendorId = await getActiveVendorId();
+  const data = getDashboard(vendorId);
+  const openDeals = listOpenDeals(vendorId);
   const activePartners = data.partners.filter((p) => p.status === "Active");
 
   return (

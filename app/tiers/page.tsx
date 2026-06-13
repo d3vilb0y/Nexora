@@ -1,18 +1,23 @@
 import { updateTier } from "@/lib/actions";
 import { listTiers } from "@/lib/data";
+import { getActiveVendor } from "@/lib/vendor";
 import { Badge, Card, Field, btnCls, inputCls } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function TiersPage() {
-  const tiers = listTiers();
+export default async function TiersPage() {
+  const vendor = await getActiveVendor();
+  const tiers = listTiers(vendor.id);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">Partner program tiers</h1>
+      <h1 className="text-xl font-bold">
+        {vendor.name} partner program tiers
+      </h1>
       <p className="text-sm text-slate-500">
         Requirements set here drive the gap analysis, tier-at-risk alerts and
-        the certification part of each partner&rsquo;s health score.
+        the certification part of each partner&rsquo;s health score — for the{" "}
+        {vendor.name} landscape. Each vendor has its own tier ladder.
       </p>
       <div className="grid gap-6 md:grid-cols-3">
         {tiers.map((t) => (

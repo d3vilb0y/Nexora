@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getDb } from "./db";
+import { ensureVendorTiers, getDb } from "./db";
+import { getActiveVendorId, VENDOR_COOKIE } from "./vendor";
 import {
   fetchSalesforceDeals,
   importDeals,
@@ -35,15 +37,92 @@ function revalidatePartner(partnerId: number | string) {
   revalidatePath("/deals");
 }
 
+// --- Vendors (tillverkare) ---
+
+/** Switch which vendor's partner landscape the whole CRM is scoped to. */
+export async function setActiveVendor(form: FormData) {
+  const id = num(form, "vendor_id");
+  (await cookies()).set(VENDOR_COOKIE, String(id), {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+    sameSite: "lax",
+  });
+  revalidatePath("/", "layout");
+}
+
+export async function createVendor(form: FormData) {
+  const db = getDb();
+  const id = Number(
+    db
+      .prepare(
+        "INSERT INTO vendors (name, description, cert_catalog, status) VALUES (?, ?, ?, ?)"
+      )
+      .run(
+        reqStr(form, "name"),
+        str(form, "description"),
+        str(form, "cert_catalog"),
+        str(form, "status") || "Active"
+      ).lastInsertRowid
+  );
+  // Give the new vendor a usable program tier ladder out of the box.
+  ensureVendorTiers(db, id);
+  // Focus the freshly created vendor right away.
+  (await cookies()).set(VENDOR_COOKIE, String(id), {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+    sameSite: "lax",
+  });
+  revalidatePath("/", "layout");
+  redirect("/admin");
+}
+
+export async function updateVendor(form: FormData) {
+  getDb()
+    .prepare(
+      "UPDATE vendors SET name = ?, description = ?, cert_catalog = ?, status = ? WHERE id = ?"
+    )
+    .run(
+      reqStr(form, "name"),
+      str(form, "description"),
+      str(form, "cert_catalog"),
+      str(form, "status") || "Active",
+      num(form, "id")
+    );
+  revalidatePath("/", "layout");
+  revalidatePath("/admin");
+}
+
+export async function deleteVendor(form: FormData) {
+  const db = getDb();
+  const id = num(form, "id");
+  const total = (
+    db.prepare("SELECT COUNT(*) AS c FROM vendors").get() as { c: number }
+  ).c;
+  if (total <= 1) {
+    redirect("/admin?error=" + encodeURIComponent("Can't delete the last vendor — the CRM needs at least one."));
+  }
+  // Cascades to the vendor's partners and everything hanging off them.
+  db.prepare("DELETE FROM vendors WHERE id = ?").run(id);
+  // If the deleted vendor was in focus, fall back to whatever remains.
+  const store = await cookies();
+  if (store.get(VENDOR_COOKIE)?.value === String(id)) {
+    store.delete(VENDOR_COOKIE);
+  }
+  revalidatePath("/", "layout");
+  redirect("/admin");
+}
+
 // --- Partners ---
 
 export async function createPartner(form: FormData) {
+  const vendorId = await getActiveVendorId();
   const result = getDb()
     .prepare(
-      `INSERT INTO partners (name, tier, status, website, region, annual_revenue, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO partners (vendor_id, name, tier, status, website, region, annual_revenue, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
+      vendorId,
       reqStr(form, "name"),
       str(form, "tier") || "Authorized",
       str(form, "status") || "Active",
@@ -305,19 +384,21 @@ function redirectWithError(message: string): never {
 }
 
 export async function importDealsFromCsv(form: FormData) {
+  const vendorId = await getActiveVendorId();
   const file = form.get("file");
   if (!(file instanceof File) || file.size === 0) {
     redirectWithError("No file uploaded.");
   }
   const { records, error } = parseSalesforceCsv(await file.text());
   if (error) redirectWithError(error);
-  redirectWithSummary(importDeals(records));
+  redirectWithSummary(importDeals(records, vendorId));
 }
 
 export async function importDealsFromSalesforceApi() {
+  const vendorId = await getActiveVendorId();
   let summary: ImportSummary;
   try {
-    summary = importDeals(await fetchSalesforceDeals());
+    summary = importDeals(await fetchSalesforceDeals(), vendorId);
   } catch (err) {
     redirectWithError(err instanceof Error ? err.message : "Salesforce sync failed.");
   }

@@ -30,11 +30,14 @@ export function mapStage(sfStage: string): { stage: string; closed: boolean } {
   return { stage: "In progress", closed: false };
 }
 
-export function importDeals(records: ImportRecord[]): ImportSummary {
+export function importDeals(
+  records: ImportRecord[],
+  vendorId: number
+): ImportSummary {
   const db = getDb();
   const partners = db
-    .prepare("SELECT id, name FROM partners")
-    .all() as { id: number; name: string }[];
+    .prepare("SELECT id, name FROM partners WHERE vendor_id = ?")
+    .all(vendorId) as { id: number; name: string }[];
   const byName = new Map(partners.map((p) => [p.name.trim().toLowerCase(), p.id]));
 
   const findBySfId = db.prepare(

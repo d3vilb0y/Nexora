@@ -20,16 +20,28 @@ function createDb(): Database.Database {
 
 function migrate(db: Database.Database) {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS tiers (
+    CREATE TABLE IF NOT EXISTS vendors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '',
+      cert_catalog TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS tiers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
       rank INTEGER NOT NULL,
       min_active_certs INTEGER NOT NULL DEFAULT 0,
-      min_annual_revenue REAL NOT NULL DEFAULT 0
+      min_annual_revenue REAL NOT NULL DEFAULT 0,
+      UNIQUE (vendor_id, name)
     );
 
     CREATE TABLE IF NOT EXISTS partners (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       tier TEXT NOT NULL DEFAULT 'Authorized',
       status TEXT NOT NULL DEFAULT 'Active',
@@ -224,17 +236,95 @@ function migrate(db: Database.Database) {
      SELECT id, partner_id FROM engagements`
   );
 
-  const tierCount = db.prepare("SELECT COUNT(*) AS c FROM tiers").get() as {
-    c: number;
-  };
-  if (tierCount.c === 0) {
-    const insert = db.prepare(
-      "INSERT INTO tiers (name, rank, min_active_certs, min_annual_revenue) VALUES (?, ?, ?, ?)"
+  migrateToMultiVendor(db, hasColumn);
+}
+
+/**
+ * The CRM used to track a single vendor's partner landscape. This brings the
+ * schema up to multiple vendors (tillverkare): every partner and every program
+ * tier now belongs to a vendor, and there is always at least one vendor so new
+ * partners have somewhere to land.
+ */
+function migrateToMultiVendor(
+  db: Database.Database,
+  hasColumn: (table: string, column: string) => boolean
+) {
+  // Make sure there's a vendor to attach existing data to.
+  const vendorCount = (
+    db.prepare("SELECT COUNT(*) AS c FROM vendors").get() as { c: number }
+  ).c;
+  let defaultVendorId: number;
+  if (vendorCount === 0) {
+    defaultVendorId = Number(
+      db
+        .prepare(
+          "INSERT INTO vendors (name, description) VALUES (?, ?)"
+        )
+        .run("Default", "Auto-created vendor — rename me in Admin.")
+        .lastInsertRowid
     );
-    insert.run("Authorized", 1, 1, 0);
-    insert.run("Silver", 2, 3, 100000);
-    insert.run("Gold", 3, 6, 500000);
+  } else {
+    defaultVendorId = (
+      db.prepare("SELECT id FROM vendors ORDER BY id LIMIT 1").get() as {
+        id: number;
+      }
+    ).id;
   }
+
+  // partners.vendor_id: add the column and backfill onto the default vendor.
+  if (!hasColumn("partners", "vendor_id")) {
+    db.exec("ALTER TABLE partners ADD COLUMN vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE");
+  }
+  db.prepare("UPDATE partners SET vendor_id = ? WHERE vendor_id IS NULL").run(
+    defaultVendorId
+  );
+
+  // tiers.vendor_id: the legacy table had a global UNIQUE(name) and no vendor,
+  // which blocks two vendors from both having a "Gold". Rebuild it when needed.
+  if (!hasColumn("tiers", "vendor_id")) {
+    db.exec(`
+      ALTER TABLE tiers RENAME TO tiers_legacy;
+      CREATE TABLE tiers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        rank INTEGER NOT NULL,
+        min_active_certs INTEGER NOT NULL DEFAULT 0,
+        min_annual_revenue REAL NOT NULL DEFAULT 0,
+        UNIQUE (vendor_id, name)
+      );
+      INSERT INTO tiers (vendor_id, name, rank, min_active_certs, min_annual_revenue)
+        SELECT ${defaultVendorId}, name, rank, min_active_certs, min_annual_revenue
+        FROM tiers_legacy;
+      DROP TABLE tiers_legacy;
+    `);
+  }
+  db.prepare("UPDATE tiers SET vendor_id = ? WHERE vendor_id IS NULL").run(
+    defaultVendorId
+  );
+
+  db.exec("CREATE INDEX IF NOT EXISTS idx_partners_vendor ON partners(vendor_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_tiers_vendor ON tiers(vendor_id)");
+
+  // Guarantee every vendor has a usable program tier ladder.
+  const vendors = db.prepare("SELECT id FROM vendors").all() as { id: number }[];
+  for (const v of vendors) ensureVendorTiers(db, v.id);
+}
+
+/** Seed the default program tiers for a vendor that has none yet. */
+export function ensureVendorTiers(db: Database.Database, vendorId: number) {
+  const count = (
+    db
+      .prepare("SELECT COUNT(*) AS c FROM tiers WHERE vendor_id = ?")
+      .get(vendorId) as { c: number }
+  ).c;
+  if (count > 0) return;
+  const insert = db.prepare(
+    "INSERT INTO tiers (vendor_id, name, rank, min_active_certs, min_annual_revenue) VALUES (?, ?, ?, ?, ?)"
+  );
+  insert.run(vendorId, "Authorized", 1, 1, 0);
+  insert.run(vendorId, "Silver", 2, 3, 100000);
+  insert.run(vendorId, "Gold", 3, 6, 500000);
 }
 
 export function getDb(): Database.Database {

@@ -272,7 +272,13 @@ function PersonRow({
               <HiddenIds partnerId={partner.id} />
               <input type="hidden" name="person_id" value={person.id} />
               <Field label="Certification *">
-                <input name="name" required className={inputCls} placeholder="e.g. ZIA" />
+                <input
+                  name="name"
+                  required
+                  list="vendor-cert-options"
+                  className={inputCls}
+                  placeholder={`e.g. ${detail.vendor.cert_catalog.split(",")[0]?.trim() || "ZIA"}`}
+                />
               </Field>
               <Field label="Level">
                 <input name="level" className={inputCls} placeholder="e.g. Professional" />
@@ -359,9 +365,20 @@ function PersonRow({
 }
 
 export function PeopleSection({ detail }: { detail: PartnerDetail }) {
-  const { partner, people, offices } = detail;
+  const { partner, people, offices, vendor } = detail;
+  const certOptions = vendor.cert_catalog
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
   return (
     <Card title="Personnel & certifications">
+      {certOptions.length > 0 && (
+        <datalist id="vendor-cert-options">
+          {certOptions.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+      )}
       {people.length === 0 ? (
         <Empty>No people tracked yet.</Empty>
       ) : (

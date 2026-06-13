@@ -1,12 +1,14 @@
 import { listPartners, listPeople } from "@/lib/data";
+import { getActiveVendorId } from "@/lib/vendor";
 import { PERSON_ROLES } from "@/lib/types";
 import { Badge, Card, Empty, PartnerLink, btnCls } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function PeoplePage() {
-  const people = listPeople();
-  const partners = listPartners();
+export default async function PeoplePage() {
+  const vendorId = await getActiveVendorId();
+  const people = listPeople(vendorId);
+  const partners = listPartners(vendorId);
   const active = people.filter((p) => p.status === "Active");
   const departed = people.filter((p) => p.status !== "Active");
 

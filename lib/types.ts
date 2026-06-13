@@ -1,5 +1,15 @@
+export type Vendor = {
+  id: number;
+  name: string;
+  description: string;
+  cert_catalog: string;
+  status: string;
+  created_at: string;
+};
+
 export type Tier = {
   id: number;
+  vendor_id: number;
   name: string;
   rank: number;
   min_active_certs: number;
@@ -8,6 +18,7 @@ export type Tier = {
 
 export type Partner = {
   id: number;
+  vendor_id: number;
   name: string;
   tier: string;
   status: string;
@@ -177,3 +188,16 @@ export const SEVERITIES = ["Low", "Medium", "High", "Critical"];
 export const NEED_STATUSES = ["Open", "In progress", "Done"];
 export const PROBLEM_STATUSES = ["Open", "Monitoring", "Resolved"];
 export const PARTNER_STATUSES = ["Active", "Onboarding", "Inactive"];
+export const VENDOR_STATUSES = ["Active", "Archived"];
+
+/** The default program tiers seeded for every new vendor. */
+export const DEFAULT_TIERS: {
+  name: string;
+  rank: number;
+  min_active_certs: number;
+  min_annual_revenue: number;
+}[] = [
+  { name: "Authorized", rank: 1, min_active_certs: 1, min_annual_revenue: 0 },
+  { name: "Silver", rank: 2, min_active_certs: 3, min_annual_revenue: 100000 },
+  { name: "Gold", rank: 3, min_active_certs: 6, min_annual_revenue: 500000 },
+];

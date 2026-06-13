@@ -1,14 +1,19 @@
 import { listCertifications } from "@/lib/data";
+import { getActiveVendor } from "@/lib/vendor";
 import { Badge, Card, CertExpiryBadge, Empty, PartnerLink } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function CertificationsPage() {
-  const certs = listCertifications();
+export default async function CertificationsPage() {
+  const vendor = await getActiveVendor();
+  const certs = listCertifications(vendor.id);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">Certifications</h1>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h1 className="text-xl font-bold">Certifications</h1>
+        <span className="text-sm text-slate-500">— {vendor.name}</span>
+      </div>
       <Card title={`All certifications (${certs.length}), soonest expiry first`}>
         {certs.length === 0 ? (
           <Empty>
