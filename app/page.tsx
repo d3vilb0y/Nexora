@@ -44,6 +44,42 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        <Card
+          title="Follow-ups due"
+          action={
+            <Link
+              href="/activity"
+              className="text-xs font-medium text-sky-700 hover:underline"
+            >
+              Activity →
+            </Link>
+          }
+        >
+          {data.openFollowUps.length === 0 ? (
+            <Empty>No open follow-ups. Inbox zero.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {data.openFollowUps.map((f) => (
+                <li key={f.id} className="flex items-baseline gap-2 text-sm">
+                  <span
+                    className={`font-semibold whitespace-nowrap ${f.overdue ? "text-rose-600" : "text-slate-400"}`}
+                  >
+                    {f.due_date
+                      ? f.overdue
+                        ? `overdue ${f.due_date}`
+                        : `due ${f.due_date}`
+                      : "no date"}
+                  </span>
+                  <span>
+                    {f.title} —{" "}
+                    <PartnerLink id={f.partner_id} name={f.partner_name} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
         <Card title="Certification expiry alerts">
           {data.expiringCerts.length === 0 ? (
             <Empty>No certifications expiring in the next 90 days.</Empty>

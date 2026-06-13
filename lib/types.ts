@@ -3,6 +3,8 @@ export type Vendor = {
   name: string;
   description: string;
   cert_catalog: string;
+  /** Microsoft Teams "Workflows" incoming-webhook URL; empty = integration off. */
+  teams_webhook_url: string;
   status: string;
   created_at: string;
 };
@@ -165,6 +167,17 @@ export type Problem = {
   description: string;
   severity: string;
   status: string;
+  created_at: string;
+};
+
+export type FollowUp = {
+  id: number;
+  partner_id: number;
+  title: string;
+  /** ISO date (YYYY-MM-DD); empty string means no due date. */
+  due_date: string;
+  /** 1 = completed. */
+  done: number;
   created_at: string;
 };
 

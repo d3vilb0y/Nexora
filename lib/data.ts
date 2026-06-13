@@ -10,9 +10,11 @@ import {
 import type {
   BusinessGoal,
   Certification,
+  Company,
   Competitor,
   Deal,
   Engagement,
+  FollowUp,
   License,
   MdfEntry,
   Need,
@@ -189,6 +191,7 @@ export type PartnerDetail = {
   competitors: Competitor[];
   needs: Need[];
   problems: Problem[];
+  followUps: FollowUp[];
   tiers: Tier[];
 };
 
@@ -309,6 +312,12 @@ export function getPartnerDetail(id: number): PartnerDetail | null {
         "SELECT * FROM problems WHERE partner_id = ? ORDER BY status != 'Resolved' DESC, created_at DESC"
       )
       .all(id) as Problem[],
+    followUps: db
+      .prepare(
+        `SELECT * FROM follow_ups WHERE partner_id = ?
+         ORDER BY done, CASE WHEN due_date = '' THEN 1 ELSE 0 END, due_date, created_at`
+      )
+      .all(id) as FollowUp[],
     tiers,
   };
 }
@@ -369,6 +378,7 @@ export type DashboardData = {
   tierAtRisk: PartnerSummary[];
   recentDepartures: (Person & { partner_name: string; eff_partner_id: number })[];
   hotProblems: (Problem & { partner_name: string })[];
+  openFollowUps: (FollowUp & { partner_name: string; overdue: boolean })[];
 };
 
 export function getDashboard(vendorId: number): DashboardData {
@@ -431,6 +441,20 @@ export function getDashboard(vendorId: number): DashboardData {
     )
     .all(vendorId) as (Problem & { partner_name: string })[];
 
+  const openFollowUps = (
+    db
+      .prepare(
+        `SELECT f.*, pa.name AS partner_name FROM follow_ups f
+         JOIN partners pa ON pa.id = f.partner_id
+         WHERE pa.vendor_id = ? AND f.done = 0
+         ORDER BY CASE WHEN f.due_date = '' THEN 1 ELSE 0 END, f.due_date, f.created_at`
+      )
+      .all(vendorId) as (FollowUp & { partner_name: string })[]
+  ).map((f) => ({
+    ...f,
+    overdue: f.due_date !== "" && f.due_date < TODAY(),
+  }));
+
   return {
     partners,
     expiringCerts,
@@ -439,6 +463,7 @@ export function getDashboard(vendorId: number): DashboardData {
     tierAtRisk,
     recentDepartures,
     hotProblems,
+    openFollowUps,
   };
 }
 
@@ -568,4 +593,294 @@ export function listLogTargets(vendorId: number): LogTarget[] {
       .filter((person) => person.eff_partner_id === p.id)
       .map(({ id, name, role }) => ({ id, name, role })),
   }));
+}
+
+// --- Companies (the cross-vendor identity behind partner rows) ---
+
+export type CompanyRow = Company & {
+  partner_count: number;
+  vendor_names: string | null;
+  shared_people_count: number;
+  total_revenue: number;
+};
+
+/** Every company, with a roll-up across all the vendors it partners with. */
+export function listCompanies(): CompanyRow[] {
+  return getDb()
+    .prepare(
+      `SELECT c.*,
+        (SELECT COUNT(*) FROM partners pa WHERE pa.company_id = c.id) AS partner_count,
+        (SELECT GROUP_CONCAT(v.name, ', ') FROM partners pa
+           JOIN vendors v ON v.id = pa.vendor_id
+           WHERE pa.company_id = c.id) AS vendor_names,
+        (SELECT COUNT(*) FROM people pe
+           WHERE pe.company_id = c.id AND pe.company_wide = 1 AND pe.status = 'Active') AS shared_people_count,
+        (SELECT COALESCE(SUM(pa.annual_revenue), 0) FROM partners pa WHERE pa.company_id = c.id) AS total_revenue
+       FROM companies c
+       ORDER BY c.name COLLATE NOCASE`
+    )
+    .all() as CompanyRow[];
+}
+
+export type CompanyPartnerRow = {
+  id: number;
+  name: string;
+  tier: string;
+  status: string;
+  region: string;
+  annual_revenue: number;
+  vendor_id: number;
+  vendor_name: string;
+};
+
+export type CompanyDetail = {
+  company: Company;
+  partners: CompanyPartnerRow[];
+  sharedPeople: Person[];
+  totalRevenue: number;
+};
+
+export function getCompanyDetail(id: number): CompanyDetail | null {
+  const db = getDb();
+  const company = db
+    .prepare("SELECT * FROM companies WHERE id = ?")
+    .get(id) as Company | undefined;
+  if (!company) return null;
+  const partners = db
+    .prepare(
+      `SELECT pa.id, pa.name, pa.tier, pa.status, pa.region, pa.annual_revenue,
+              pa.vendor_id, v.name AS vendor_name
+       FROM partners pa JOIN vendors v ON v.id = pa.vendor_id
+       WHERE pa.company_id = ?
+       ORDER BY v.name COLLATE NOCASE`
+    )
+    .all(id) as CompanyPartnerRow[];
+  // Sales/Management shared across every vendor the company works with.
+  const sharedPeople = db
+    .prepare(
+      `SELECT * FROM people WHERE company_id = ? AND company_wide = 1
+       ORDER BY status, name COLLATE NOCASE`
+    )
+    .all(id) as Person[];
+  return {
+    company,
+    partners,
+    sharedPeople,
+    totalRevenue: partners.reduce((s, p) => s + p.annual_revenue, 0),
+  };
+}
+
+// --- Global search ---
+
+export type SearchResults = {
+  partners: { id: number; name: string; tier: string; status: string }[];
+  people: {
+    id: number;
+    name: string;
+    role: string;
+    title: string;
+    email: string;
+    eff_partner_id: number;
+    partner_name: string;
+  }[];
+  deals: DealRow[];
+  companies: { id: number; name: string; vendor_names: string | null }[];
+};
+
+/**
+ * Free-text search across the active vendor's partners, people and deals, plus
+ * companies globally (companies span vendors). Returns empty groups for a blank
+ * query.
+ */
+export function search(vendorId: number, query: string): SearchResults {
+  const q = query.trim();
+  const empty: SearchResults = {
+    partners: [],
+    people: [],
+    deals: [],
+    companies: [],
+  };
+  if (!q) return empty;
+  const db = getDb();
+  const like = `%${q.replace(/[%_]/g, (m) => "\\" + m)}%`;
+
+  const partners = db
+    .prepare(
+      `SELECT id, name, tier, status FROM partners
+       WHERE vendor_id = @vendor AND name LIKE @like ESCAPE '\\'
+       ORDER BY name COLLATE NOCASE LIMIT 25`
+    )
+    .all({ vendor: vendorId, like }) as SearchResults["partners"];
+
+  const people = db
+    .prepare(
+      `SELECT pe.id, pe.name, pe.role, pe.title, pe.email,
+        ${EFF_PARTNER_ID} AS eff_partner_id,
+        (SELECT c.name FROM companies c WHERE c.id = pe.company_id) AS partner_name
+       FROM people pe
+       WHERE ${PERSON_IN_VENDOR}
+         AND (pe.name LIKE @like ESCAPE '\\' OR pe.email LIKE @like ESCAPE '\\' OR pe.title LIKE @like ESCAPE '\\')
+       ORDER BY pe.status, pe.name COLLATE NOCASE LIMIT 25`
+    )
+    .all({ vendor: vendorId, like }) as SearchResults["people"];
+
+  const deals = db
+    .prepare(
+      `SELECT d.*, pa.name AS partner_name FROM deals d
+       JOIN partners pa ON pa.id = d.partner_id
+       WHERE pa.vendor_id = @vendor
+         AND (d.customer LIKE @like ESCAPE '\\' OR d.title LIKE @like ESCAPE '\\')
+       ORDER BY d.registered_date DESC LIMIT 25`
+    )
+    .all({ vendor: vendorId, like }) as DealRow[];
+
+  const companies = db
+    .prepare(
+      `SELECT c.id, c.name,
+        (SELECT GROUP_CONCAT(v.name, ', ') FROM partners pa
+           JOIN vendors v ON v.id = pa.vendor_id WHERE pa.company_id = c.id) AS vendor_names
+       FROM companies c
+       WHERE c.name LIKE @like ESCAPE '\\'
+       ORDER BY c.name COLLATE NOCASE LIMIT 25`
+    )
+    .all({ like }) as SearchResults["companies"];
+
+  return { partners, people, deals, companies };
+}
+
+// --- Activity feed (derived from existing timestamps; no extra writes) ---
+
+export type ActivityEvent = {
+  kind: "engagement" | "cert" | "departure" | "partner" | "deal";
+  /** ISO date or datetime; used for sorting and display. */
+  date: string;
+  text: string;
+  partner_id: number | null;
+  partner_name: string | null;
+};
+
+/** A recent-activity stream for the active vendor, newest first. */
+export function listActivity(vendorId: number, limit = 40): ActivityEvent[] {
+  const db = getDb();
+  const events: ActivityEvent[] = [];
+
+  for (const e of db
+    .prepare(
+      `SELECT e.date, e.type, pa.id AS partner_id, pa.name AS partner_name
+       FROM engagements e JOIN partners pa ON pa.id = e.partner_id
+       WHERE pa.vendor_id = ? ORDER BY e.date DESC, e.id DESC LIMIT ?`
+    )
+    .all(vendorId, limit) as {
+    date: string;
+    type: string;
+    partner_id: number;
+    partner_name: string;
+  }[]) {
+    events.push({
+      kind: "engagement",
+      date: e.date,
+      text: `Logged ${e.type.toLowerCase()}`,
+      partner_id: e.partner_id,
+      partner_name: e.partner_name,
+    });
+  }
+
+  for (const c of db
+    .prepare(
+      `SELECT cf.created_at, cf.name, cf.level, pe.name AS person_name,
+        ${EFF_PARTNER_ID} AS partner_id,
+        (SELECT co.name FROM companies co WHERE co.id = pe.company_id) AS partner_name
+       FROM certifications cf JOIN people pe ON pe.id = cf.person_id
+       WHERE cf.vendor_id = @vendor ORDER BY cf.created_at DESC LIMIT @limit`
+    )
+    .all({ vendor: vendorId, limit }) as {
+    created_at: string;
+    name: string;
+    level: string;
+    person_name: string;
+    partner_id: number;
+    partner_name: string;
+  }[]) {
+    events.push({
+      kind: "cert",
+      date: c.created_at.slice(0, 10),
+      text: `${c.person_name} gained ${c.name}${c.level ? ` (${c.level})` : ""}`,
+      partner_id: c.partner_id,
+      partner_name: c.partner_name,
+    });
+  }
+
+  for (const d of db
+    .prepare(
+      `SELECT pe.name AS person_name, pe.departed_at, pe.departed_to,
+        ${EFF_PARTNER_ID} AS partner_id,
+        (SELECT co.name FROM companies co WHERE co.id = pe.company_id) AS partner_name
+       FROM people pe
+       WHERE pe.status = 'Departed' AND pe.departed_at != '' AND ${PERSON_IN_VENDOR}
+       ORDER BY pe.departed_at DESC LIMIT @limit`
+    )
+    .all({ vendor: vendorId, limit }) as {
+    person_name: string;
+    departed_at: string;
+    departed_to: string;
+    partner_id: number;
+    partner_name: string;
+  }[]) {
+    events.push({
+      kind: "departure",
+      date: d.departed_at,
+      text: `${d.person_name} departed${d.departed_to ? ` → ${d.departed_to}` : ""}`,
+      partner_id: d.partner_id,
+      partner_name: d.partner_name,
+    });
+  }
+
+  for (const p of db
+    .prepare(
+      `SELECT id, name, created_at FROM partners
+       WHERE vendor_id = ? ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(vendorId, limit) as {
+    id: number;
+    name: string;
+    created_at: string;
+  }[]) {
+    events.push({
+      kind: "partner",
+      date: p.created_at.slice(0, 10),
+      text: "Partner added",
+      partner_id: p.id,
+      partner_name: p.name,
+    });
+  }
+
+  for (const d of db
+    .prepare(
+      `SELECT d.customer, d.title, d.value, d.stage, d.registered_date,
+              pa.id AS partner_id, pa.name AS partner_name
+       FROM deals d JOIN partners pa ON pa.id = d.partner_id
+       WHERE pa.vendor_id = ? ORDER BY d.registered_date DESC LIMIT ?`
+    )
+    .all(vendorId, limit) as {
+    customer: string;
+    title: string;
+    value: number;
+    stage: string;
+    registered_date: string;
+    partner_id: number;
+    partner_name: string;
+  }[]) {
+    events.push({
+      kind: "deal",
+      date: d.registered_date,
+      text: `Deal ${d.stage.toLowerCase()}: ${d.customer}${d.title ? ` — ${d.title}` : ""}`,
+      partner_id: d.partner_id,
+      partner_name: d.partner_name,
+    });
+  }
+
+  return events
+    .filter((e) => e.date)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    .slice(0, limit);
 }

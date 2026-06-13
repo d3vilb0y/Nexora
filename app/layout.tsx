@@ -12,8 +12,10 @@ export const metadata: Metadata = {
 
 const NAV = [
   { href: "/", label: "Dashboard" },
+  { href: "/activity", label: "Activity" },
   { href: "/log", label: "Log" },
   { href: "/partners", label: "Partners" },
+  { href: "/companies", label: "Companies" },
   { href: "/deals", label: "Deals" },
   { href: "/people", label: "People" },
   { href: "/certifications", label: "Certifications" },
@@ -40,6 +42,15 @@ export default async function RootLayout({
             {vendors.length > 0 && (
               <VendorSwitcher vendors={vendors} activeId={activeVendorId} />
             )}
+            <form action="/search" method="get" className="hidden md:block">
+              <input
+                type="search"
+                name="q"
+                placeholder="Search…"
+                aria-label="Search"
+                className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-500 focus:outline-none"
+              />
+            </form>
             <nav className="-mx-1 flex gap-1 overflow-x-auto sm:ml-auto">
               {NAV.map((item) => (
                 <Link
