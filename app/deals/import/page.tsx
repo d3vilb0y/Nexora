@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { importDealsFromCsv, importDealsFromSalesforceApi } from "@/lib/actions";
-import { salesforceConfigured } from "@/lib/deal-import";
+import { salesforceAuthMode } from "@/lib/deal-import";
 import { Card, btnCls } from "@/components/ui";
+
+const AUTH_LABELS: Record<string, string> = {
+  "oauth-refresh": "OAuth (refresh-token grant)",
+  "oauth-client-credentials": "OAuth (client-credentials grant)",
+  "static-token": "static access token (legacy — expires)",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +22,8 @@ export default async function ImportPage({
   }>;
 }) {
   const params = await searchParams;
-  const apiReady = salesforceConfigured();
+  const authMode = salesforceAuthMode();
+  const apiReady = authMode !== "none";
 
   return (
     <div className="space-y-6">
@@ -84,31 +91,61 @@ export default async function ImportPage({
         {apiReady ? (
           <form action={importDealsFromSalesforceApi} className="space-y-3">
             <p className="text-sm text-slate-600">
-              Connected to{" "}
-              <code className="rounded bg-slate-100 px-1">
-                {process.env.SF_INSTANCE_URL}
-              </code>
-              . Pulls the 200 most recent opportunities and matches partners by
-              name.
+              Authenticating via{" "}
+              <span className="font-medium">{AUTH_LABELS[authMode]}</span>. Pulls
+              the 200 most recent opportunities and matches partners by name.
+              {authMode.startsWith("oauth") && (
+                <>
+                  {" "}
+                  Access tokens are fetched and refreshed automatically, and
+                  re-issued on expiry.
+                </>
+              )}
+              {authMode === "static-token" && (
+                <>
+                  {" "}
+                  Heads up: a static token expires — set{" "}
+                  <code className="rounded bg-slate-100 px-1">SF_CLIENT_ID</code>{" "}
+                  and{" "}
+                  <code className="rounded bg-slate-100 px-1">
+                    SF_CLIENT_SECRET
+                  </code>{" "}
+                  to switch to auto-refreshing OAuth.
+                </>
+              )}
             </p>
             <button type="submit" className={btnCls}>
               Sync from Salesforce
             </button>
           </form>
         ) : (
-          <div className="space-y-2 text-sm text-slate-600">
+          <div className="space-y-3 text-sm text-slate-600">
             <p>
-              Not configured. Set these environment variables (e.g. in{" "}
-              <code className="rounded bg-slate-100 px-1">.env.local</code>)
-              and restart:
+              Not configured. The recommended setup is an auto-refreshing OAuth
+              connected app — set these (e.g. in{" "}
+              <code className="rounded bg-slate-100 px-1">.env.local</code>) and
+              restart:
             </p>
             <pre className="rounded-md bg-slate-100 p-3 text-xs">
-              {`SF_INSTANCE_URL=https://yourorg.my.salesforce.com
-SF_ACCESS_TOKEN=<connected-app access token>
+              {`# OAuth client-credentials (server-to-server, recommended)
+SF_CLIENT_ID=<connected app consumer key>
+SF_CLIENT_SECRET=<connected app consumer secret>
+# optional — refresh-token grant instead of client-credentials:
+SF_REFRESH_TOKEN=<refresh token>
 # optional:
-SF_PARTNER_FIELD=Partner_Account__r.Name   # field holding the partner name (default Account.Name)
-SF_SOQL_WHERE=Partner_Account__c != null   # extra opportunity filter`}
+SF_LOGIN_URL=https://login.salesforce.com   # token host (use test.salesforce.com for sandboxes)
+SF_INSTANCE_URL=https://yourorg.my.salesforce.com  # used if the token omits instance_url
+SF_PARTNER_FIELD=Partner_Account__r.Name    # field holding the partner name (default Account.Name)
+SF_SOQL_WHERE=Partner_Account__c != null    # extra opportunity filter`}
             </pre>
+            <p className="text-xs text-slate-500">
+              A pre-issued{" "}
+              <code className="rounded bg-slate-100 px-1">SF_ACCESS_TOKEN</code>{" "}
+              (with{" "}
+              <code className="rounded bg-slate-100 px-1">SF_INSTANCE_URL</code>)
+              still works for a quick test, but it expires and won&rsquo;t
+              auto-renew.
+            </p>
           </div>
         )}
       </Card>

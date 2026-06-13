@@ -148,31 +148,165 @@ export function parseSalesforceCsv(text: string): {
   return { records };
 }
 
+export type SalesforceAuthMode =
+  | "oauth-refresh"
+  | "oauth-client-credentials"
+  | "static-token"
+  | "none";
+
+/** Which credentials are present, in priority order. */
+export function salesforceAuthMode(): SalesforceAuthMode {
+  if (process.env.SF_CLIENT_ID && process.env.SF_CLIENT_SECRET) {
+    return process.env.SF_REFRESH_TOKEN
+      ? "oauth-refresh"
+      : "oauth-client-credentials";
+  }
+  if (process.env.SF_INSTANCE_URL && process.env.SF_ACCESS_TOKEN) {
+    return "static-token";
+  }
+  return "none";
+}
+
 export function salesforceConfigured(): boolean {
-  return Boolean(process.env.SF_INSTANCE_URL && process.env.SF_ACCESS_TOKEN);
+  return salesforceAuthMode() !== "none";
+}
+
+type TokenCache = {
+  accessToken: string;
+  instanceUrl: string;
+  // Earliest wall-clock time (ms) at which we should proactively refresh.
+  refreshAfter: number;
+};
+
+// Survive Next.js dev hot-reloads so we don't re-auth on every edit.
+declare global {
+  var __sfToken: TokenCache | undefined;
+}
+
+function tokenEndpoint(): string {
+  const base = (
+    process.env.SF_LOGIN_URL || "https://login.salesforce.com"
+  ).replace(/\/$/, "");
+  return `${base}/services/oauth2/token`;
+}
+
+/**
+ * Obtain an access token via OAuth, or fall back to a static SF_ACCESS_TOKEN.
+ *   client_credentials: SF_CLIENT_ID + SF_CLIENT_SECRET (connected app with a
+ *                       run-as user; simplest server-to-server)
+ *   refresh_token:      additionally set SF_REFRESH_TOKEN
+ * The returned instance_url from Salesforce is preferred over SF_INSTANCE_URL.
+ */
+async function requestAccessToken(): Promise<TokenCache> {
+  const mode = salesforceAuthMode();
+  if (mode === "static-token") {
+    return {
+      accessToken: process.env.SF_ACCESS_TOKEN!,
+      instanceUrl: process.env.SF_INSTANCE_URL!.replace(/\/$/, ""),
+      // Static tokens can't be refreshed; treat as always "fresh" and let a
+      // 401 surface the real error.
+      refreshAfter: Number.MAX_SAFE_INTEGER,
+    };
+  }
+  if (mode === "none") {
+    throw new Error("Salesforce is not configured.");
+  }
+
+  const body = new URLSearchParams({
+    client_id: process.env.SF_CLIENT_ID!,
+    client_secret: process.env.SF_CLIENT_SECRET!,
+  });
+  if (mode === "oauth-refresh") {
+    body.set("grant_type", "refresh_token");
+    body.set("refresh_token", process.env.SF_REFRESH_TOKEN!);
+  } else {
+    body.set("grant_type", "client_credentials");
+  }
+
+  const res = await fetch(tokenEndpoint(), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Salesforce auth failed (${res.status}): ${(await res.text()).slice(0, 300)}`
+    );
+  }
+  const data = (await res.json()) as {
+    access_token?: string;
+    instance_url?: string;
+    expires_in?: number;
+  };
+  const instanceUrl = (
+    data.instance_url ||
+    process.env.SF_INSTANCE_URL ||
+    ""
+  ).replace(/\/$/, "");
+  if (!data.access_token || !instanceUrl) {
+    throw new Error(
+      "Salesforce auth response missing access_token or instance_url."
+    );
+  }
+  // expires_in is seconds when present; otherwise assume a conservative 15 min.
+  const ttlMs = (data.expires_in ? data.expires_in : 900) * 1000;
+  return {
+    accessToken: data.access_token,
+    instanceUrl,
+    refreshAfter: Date.now() + Math.max(0, ttlMs - 60_000),
+  };
+}
+
+async function getAccessToken(forceRefresh = false): Promise<TokenCache> {
+  if (
+    !forceRefresh &&
+    globalThis.__sfToken &&
+    Date.now() < globalThis.__sfToken.refreshAfter
+  ) {
+    return globalThis.__sfToken;
+  }
+  globalThis.__sfToken = await requestAccessToken();
+  return globalThis.__sfToken;
 }
 
 /**
  * Pull opportunities straight from the Salesforce REST API.
- * Requires env vars:
- *   SF_INSTANCE_URL  e.g. https://yourorg.my.salesforce.com
- *   SF_ACCESS_TOKEN  a session/connected-app token
+ * Auth (in priority order):
+ *   SF_CLIENT_ID + SF_CLIENT_SECRET            → client_credentials grant
+ *   (+ SF_REFRESH_TOKEN)                       → refresh_token grant
+ *   SF_INSTANCE_URL + SF_ACCESS_TOKEN          → static token (legacy)
  * Optional:
+ *   SF_LOGIN_URL     token host (default https://login.salesforce.com)
+ *   SF_INSTANCE_URL  API host if the token response omits instance_url
  *   SF_PARTNER_FIELD field holding the partner name (default Account.Name)
  *   SF_SOQL_WHERE    extra filter, e.g. "Partner_Account__c != null"
  */
 export async function fetchSalesforceDeals(): Promise<ImportRecord[]> {
-  const instance = process.env.SF_INSTANCE_URL!.replace(/\/$/, "");
   const partnerField = process.env.SF_PARTNER_FIELD || "Account.Name";
   const where = process.env.SF_SOQL_WHERE ? ` WHERE ${process.env.SF_SOQL_WHERE}` : "";
-  const soql = `SELECT Id, Name, Amount, StageName, CloseDate, Account.Name, ${partnerField} FROM Opportunity${where} ORDER BY CloseDate DESC LIMIT 200`;
-  const res = await fetch(
-    `${instance}/services/data/v60.0/query?q=${encodeURIComponent(soql)}`,
-    {
-      headers: { Authorization: `Bearer ${process.env.SF_ACCESS_TOKEN}` },
-      cache: "no-store",
-    }
+  // Dedupe so the default partnerField (Account.Name) isn't selected twice.
+  const fields = Array.from(
+    new Set(["Id", "Name", "Amount", "StageName", "CloseDate", "Account.Name", partnerField])
   );
+  const soql = `SELECT ${fields.join(", ")} FROM Opportunity${where} ORDER BY CloseDate DESC LIMIT 200`;
+
+  const query = (token: TokenCache) =>
+    fetch(
+      `${token.instanceUrl}/services/data/v60.0/query?q=${encodeURIComponent(soql)}`,
+      {
+        headers: { Authorization: `Bearer ${token.accessToken}` },
+        cache: "no-store",
+      }
+    );
+
+  let token = await getAccessToken();
+  let res = await query(token);
+  if (res.status === 401) {
+    // Token expired or revoked — re-authenticate once and retry.
+    token = await getAccessToken(true);
+    res = await query(token);
+  }
   if (!res.ok) {
     throw new Error(`Salesforce API error ${res.status}: ${(await res.text()).slice(0, 300)}`);
   }

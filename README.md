@@ -28,8 +28,10 @@ with a health score and tier gap analysis on top.
   60+ days surface as "gone quiet".
 - **Deals** — register deals partners bring us into, with our support noted
   and a stage workflow; **Salesforce import** via report CSV upload or direct
-  REST API sync (`SF_INSTANCE_URL` + `SF_ACCESS_TOKEN`), deduped on
-  opportunity ID.
+  REST API sync, deduped on opportunity ID. The API sync authenticates with an
+  auto-refreshing OAuth connected app (`SF_CLIENT_ID` + `SF_CLIENT_SECRET`,
+  optionally `SF_REFRESH_TOKEN`); a static `SF_ACCESS_TOKEN` is also accepted
+  for quick tests. Tokens are cached and re-issued automatically on expiry.
 - **MDF / co-op funds** — allocation and usage ledger with running balance.
 - **NFR / lab licenses** — demo tenants and gear per partner, with expiry alerts.
 - **Joint business plans** — yearly goals with progress bars.
