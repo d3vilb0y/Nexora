@@ -703,14 +703,156 @@ export async function deleteFollowUp(form: FormData) {
 
 // --- Tiers ---
 
+function revalidateTiers() {
+  // Tier names surface on partner badges across the whole app, so refresh broadly.
+  revalidatePath("/", "layout");
+}
+
+function tiersRedirect(params: Record<string, string>): never {
+  redirect(`/tiers?${new URLSearchParams(params).toString()}`);
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("UNIQUE");
+}
+
+/** Add a new program tier (level) to the active vendor's ladder, at the top. */
+export async function createTier(form: FormData) {
+  const vendorId = await getActiveVendorId();
+  const name = reqStr(form, "name");
+  const db = getDb();
+  const maxRank = (
+    db
+      .prepare("SELECT COALESCE(MAX(rank), 0) AS r FROM tiers WHERE vendor_id = ?")
+      .get(vendorId) as { r: number }
+  ).r;
+  try {
+    db.prepare(
+      "INSERT INTO tiers (vendor_id, name, rank, min_active_certs, min_annual_revenue) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      vendorId,
+      name,
+      maxRank + 1,
+      num(form, "min_active_certs"),
+      num(form, "min_annual_revenue")
+    );
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      tiersRedirect({ error: `A “${name}” tier already exists for this vendor.` });
+    }
+    throw err;
+  }
+  revalidateTiers();
+}
+
+/** Rename a tier and/or edit its requirements; renames follow through to partners. */
 export async function updateTier(form: FormData) {
-  getDb()
+  const vendorId = await getActiveVendorId();
+  const id = num(form, "id");
+  const name = reqStr(form, "name");
+  const db = getDb();
+  const existing = db
+    .prepare("SELECT name FROM tiers WHERE id = ? AND vendor_id = ?")
+    .get(id, vendorId) as { name: string } | undefined;
+  if (!existing) tiersRedirect({ error: "That tier no longer exists." });
+  try {
+    db.transaction(() => {
+      db.prepare(
+        "UPDATE tiers SET name = ?, min_active_certs = ?, min_annual_revenue = ? WHERE id = ? AND vendor_id = ?"
+      ).run(
+        name,
+        num(form, "min_active_certs"),
+        num(form, "min_annual_revenue"),
+        id,
+        vendorId
+      );
+      // partner.tier stores the tier name, so keep pinned partners in sync.
+      if (name !== existing.name) {
+        db.prepare(
+          "UPDATE partners SET tier = ? WHERE vendor_id = ? AND tier = ?"
+        ).run(name, vendorId, existing.name);
+      }
+    })();
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      tiersRedirect({ error: `A “${name}” tier already exists for this vendor.` });
+    }
+    throw err;
+  }
+  revalidateTiers();
+}
+
+/** Move a tier one step up (higher rank) or down its vendor's ladder. */
+export async function moveTier(form: FormData) {
+  const vendorId = await getActiveVendorId();
+  const id = num(form, "id");
+  const up = str(form, "dir") === "up";
+  const db = getDb();
+  const tier = db
+    .prepare("SELECT id, rank FROM tiers WHERE id = ? AND vendor_id = ?")
+    .get(id, vendorId) as { id: number; rank: number } | undefined;
+  if (!tier) tiersRedirect({ error: "That tier no longer exists." });
+  // The neighbour to swap ranks with: next higher rank when moving up, else next lower.
+  const neighbour = db
     .prepare(
-      "UPDATE tiers SET min_active_certs = ?, min_annual_revenue = ? WHERE id = ?"
+      `SELECT id, rank FROM tiers
+       WHERE vendor_id = ? AND rank ${up ? ">" : "<"} ?
+       ORDER BY rank ${up ? "ASC" : "DESC"} LIMIT 1`
     )
-    .run(num(form, "min_active_certs"), num(form, "min_annual_revenue"), num(form, "id"));
-  revalidatePath("/");
-  revalidatePath("/partners");
-  revalidatePath("/tiers");
-  revalidatePath("/partners/[id]", "page");
+    .get(vendorId, tier.rank) as { id: number; rank: number } | undefined;
+  if (neighbour) {
+    db.transaction(() => {
+      db.prepare("UPDATE tiers SET rank = ? WHERE id = ?").run(neighbour.rank, tier.id);
+      db.prepare("UPDATE tiers SET rank = ? WHERE id = ?").run(tier.rank, neighbour.id);
+    })();
+    revalidateTiers();
+  }
+}
+
+/** Remove a tier, moving any partners on it down to the nearest remaining tier. */
+export async function deleteTier(form: FormData) {
+  const vendorId = await getActiveVendorId();
+  const id = num(form, "id");
+  const db = getDb();
+  const tier = db
+    .prepare("SELECT name, rank FROM tiers WHERE id = ? AND vendor_id = ?")
+    .get(id, vendorId) as { name: string; rank: number } | undefined;
+  if (!tier) tiersRedirect({ error: "That tier no longer exists." });
+  const total = (
+    db
+      .prepare("SELECT COUNT(*) AS c FROM tiers WHERE vendor_id = ?")
+      .get(vendorId) as { c: number }
+  ).c;
+  if (total <= 1) {
+    tiersRedirect({ error: "Keep at least one tier — a program needs a ladder." });
+  }
+  // Re-home partners on this tier so none are left pointing at a deleted level:
+  // prefer the next lower tier, otherwise the lowest one that remains.
+  const fallback = (db
+    .prepare(
+      "SELECT name FROM tiers WHERE vendor_id = ? AND id != ? AND rank < ? ORDER BY rank DESC LIMIT 1"
+    )
+    .get(vendorId, id, tier.rank) ??
+    db
+      .prepare(
+        "SELECT name FROM tiers WHERE vendor_id = ? AND id != ? ORDER BY rank ASC LIMIT 1"
+      )
+      .get(vendorId, id)) as { name: string };
+  let moved = 0;
+  db.transaction(() => {
+    moved = db
+      .prepare("UPDATE partners SET tier = ? WHERE vendor_id = ? AND tier = ?")
+      .run(fallback.name, vendorId, tier.name).changes;
+    db.prepare("DELETE FROM tiers WHERE id = ? AND vendor_id = ?").run(id, vendorId);
+  })();
+  revalidateTiers();
+  tiersRedirect(
+    moved > 0
+      ? {
+          notice: `Deleted “${tier.name}” and moved ${moved} partner${
+            moved === 1 ? "" : "s"
+          } to “${fallback.name}”.`,
+        }
+      : { notice: `Deleted the “${tier.name}” tier.` }
+  );
 }
