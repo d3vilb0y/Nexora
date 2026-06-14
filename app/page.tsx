@@ -5,6 +5,7 @@ import { formatMoney } from "@/lib/health";
 import { Badge, Card, Empty, HealthBadge, PartnerLink } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const vendorId = await getActiveVendorId();

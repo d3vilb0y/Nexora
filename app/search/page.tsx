@@ -5,6 +5,7 @@ import { formatMoney } from "@/lib/health";
 import { Badge, Card, Empty, PartnerLink, inputCls, btnCls } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Search" };
 
 export default async function SearchPage({
   searchParams,

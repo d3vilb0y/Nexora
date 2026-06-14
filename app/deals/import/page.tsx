@@ -10,6 +10,7 @@ const AUTH_LABELS: Record<string, string> = {
 };
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Import deals" };
 
 export default async function ImportPage({
   searchParams,

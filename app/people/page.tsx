@@ -4,6 +4,7 @@ import { PERSON_ROLES } from "@/lib/types";
 import { Badge, Card, Empty, PartnerLink, btnCls } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "People" };
 
 export default async function PeoplePage() {
   const vendorId = await getActiveVendorId();

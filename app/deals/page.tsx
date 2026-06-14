@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Deals" };
 
 export default async function DealsPage() {
   const vendorId = await getActiveVendorId();

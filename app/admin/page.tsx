@@ -19,6 +19,7 @@ import {
 } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Admin" };
 
 export default async function AdminPage({
   searchParams,

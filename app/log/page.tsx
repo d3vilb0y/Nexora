@@ -4,6 +4,7 @@ import { Badge, Card, Empty, PartnerLink } from "@/components/ui";
 import { QuickLogForm } from "@/components/quick-log-form";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Log engagement" };
 
 export default async function LogPage() {
   const vendorId = await getActiveVendorId();

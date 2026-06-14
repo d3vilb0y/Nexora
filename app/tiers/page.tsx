@@ -4,6 +4,7 @@ import { getActiveVendor } from "@/lib/vendor";
 import { Badge, Card, Field, btnCls, inputCls } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Tiers" };
 
 export default async function TiersPage() {
   const vendor = await getActiveVendor();
