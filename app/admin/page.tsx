@@ -72,6 +72,7 @@ export default async function AdminPage({
                   ) : (
                     <form action={setActiveVendor}>
                       <input type="hidden" name="vendor_id" value={v.id} />
+                      <input type="hidden" name="return_to" value="/admin" />
                       <button
                         type="submit"
                         className="text-xs font-medium text-sky-700 hover:underline"

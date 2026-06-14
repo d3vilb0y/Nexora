@@ -49,6 +49,11 @@ function revalidatePartner(partnerId: number | string) {
 
 // --- Vendors (tillverkare) ---
 
+/** Only follow internal absolute paths, so a forged form can't redirect away. */
+function safeReturnTo(path: string): string {
+  return path.startsWith("/") && !path.startsWith("//") ? path : "/";
+}
+
 /** Switch which vendor's partner landscape the whole CRM is scoped to. */
 export async function setActiveVendor(form: FormData) {
   const id = num(form, "vendor_id");
@@ -58,6 +63,12 @@ export async function setActiveVendor(form: FormData) {
     sameSite: "lax",
   });
   revalidatePath("/", "layout");
+  // A Server Action's post-mutation re-render reads the *incoming* request
+  // cookies, not the one we just set, so the page would otherwise snap back to
+  // the previous vendor. Redirecting issues a fresh request that sees the new
+  // cookie and re-scopes the whole CRM. We land back on the page the switch was
+  // made from (defaulting to the dashboard).
+  redirect(safeReturnTo(str(form, "return_to")));
 }
 
 export async function createVendor(form: FormData) {

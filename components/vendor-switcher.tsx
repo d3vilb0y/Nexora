@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { usePathname } from "next/navigation";
 import { setActiveVendor } from "@/lib/actions";
 import type { Vendor } from "@/lib/types";
 
@@ -16,9 +17,13 @@ export function VendorSwitcher({
   activeId: number;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  // So the action can redirect back here: the post-action re-render reads the
+  // old request cookie, so we round-trip through a fresh request instead.
+  const pathname = usePathname();
 
   return (
     <form ref={formRef} action={setActiveVendor} className="flex items-center gap-1.5">
+      <input type="hidden" name="return_to" value={pathname} />
       <label className="text-xs font-medium text-slate-400" htmlFor="vendor-switch">
         Vendor
       </label>
