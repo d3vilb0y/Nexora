@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { getActiveVendorId, listVendors } from "@/lib/vendor";
 import { VendorSwitcher } from "@/components/vendor-switcher";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { THEME_COOKIE, resolveTheme } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -30,9 +33,13 @@ export default async function RootLayout({
 }>) {
   const vendors = listVendors();
   const activeVendorId = await getActiveVendorId();
+  const theme = resolveTheme((await cookies()).get(THEME_COOKIE)?.value);
 
   return (
-    <html lang="en" className="h-full antialiased">
+    <html
+      lang="en"
+      className={`h-full antialiased${theme === "dark" ? " dark" : ""}`}
+    >
       <body className="min-h-full bg-slate-50 text-slate-900">
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3">
@@ -62,6 +69,7 @@ export default async function RootLayout({
                 </Link>
               ))}
             </nav>
+            <ThemeToggle initial={theme} />
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>

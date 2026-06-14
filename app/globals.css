@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Class-based dark mode (toggled on <html>), instead of prefers-color-scheme. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -12,11 +15,33 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/*
+ * The UI is built almost entirely on Tailwind's neutral ramp (white + slate-*).
+ * In v4 those utilities resolve to `var(--color-*)`, so re-pointing the ramp
+ * here flips every surface, border and text colour at once — no per-component
+ * `dark:` classes needed. The scale is inverted (light steps become dark and
+ * vice-versa) with a little extra contrast between the page and raised surfaces.
+ * Accent colours (sky, emerald, rose, …) are intentionally left untouched so
+ * status chips stay legible.
+ */
+.dark {
+  color-scheme: dark;
+
+  --background: #020617;
+  --foreground: #f8fafc;
+
+  --color-white: #0f172a; /* raised surfaces: cards, header */
+  --color-slate-50: #020617; /* page background */
+  --color-slate-100: #1e293b; /* hover / subtle fills */
+  --color-slate-200: #334155; /* borders */
+  --color-slate-300: #475569;
+  --color-slate-400: #94a3b8; /* muted text */
+  --color-slate-500: #cbd5e1;
+  --color-slate-600: #cbd5e1; /* secondary text */
+  --color-slate-700: #e2e8f0;
+  --color-slate-800: #f1f5f9;
+  --color-slate-900: #f8fafc; /* primary text */
+  --color-slate-950: #ffffff;
 }
 
 body {
