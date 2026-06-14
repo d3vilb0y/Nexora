@@ -10,6 +10,7 @@ import {
   Field,
   HealthBadge,
   PartnerLink,
+  TierBadge,
   btnCls,
   inputCls,
 } from "@/components/ui";
@@ -55,7 +56,7 @@ export default async function PartnersPage() {
                     <PartnerLink id={p.id} name={p.name} />
                   </td>
                   <td className="py-2 pr-4">
-                    <Badge value={p.tier} />
+                    <TierBadge tier={p.tier} tiers={tiers} />
                   </td>
                   <td className="py-2 pr-4">
                     <Badge value={p.status} />

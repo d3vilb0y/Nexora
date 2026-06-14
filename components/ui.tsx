@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { certStatus } from "@/lib/health";
 import type { HealthScore } from "@/lib/health";
+import type { Tier } from "@/lib/types";
 
 const BADGE_COLORS: Record<string, string> = {
   // tiers
@@ -46,6 +47,39 @@ export function Badge({ value }: { value: string }) {
       className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${color}`}
     >
       {value}
+    </span>
+  );
+}
+
+// Low → high "richness" ramp; a tier is coloured by its position in the ladder
+// so any custom set of levels reads as a gradient instead of flat grey.
+const TIER_PALETTE = [
+  "bg-slate-200 text-slate-700",
+  "bg-sky-100 text-sky-800",
+  "bg-emerald-100 text-emerald-800",
+  "bg-amber-100 text-amber-800",
+  "bg-violet-100 text-violet-800",
+];
+
+/**
+ * A partner-tier badge coloured by where the tier sits in its vendor's ladder
+ * (higher rank = richer colour). Falls back to a neutral badge if the name
+ * isn't in the ladder (e.g. a tier that was just deleted).
+ */
+export function TierBadge({ tier, tiers }: { tier: string; tiers: Tier[] }) {
+  const sorted = [...tiers].sort((a, b) => a.rank - b.rank);
+  const idx = sorted.findIndex((t) => t.name === tier);
+  if (idx === -1) return <Badge value={tier} />;
+  const max = sorted.length - 1;
+  const pos =
+    max <= 0
+      ? TIER_PALETTE.length - 1
+      : Math.round((idx / max) * (TIER_PALETTE.length - 1));
+  return (
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${TIER_PALETTE[pos]}`}
+    >
+      {tier}
     </span>
   );
 }

@@ -2,9 +2,9 @@ import { createTier, deleteTier, moveTier, updateTier } from "@/lib/actions";
 import { listTiers } from "@/lib/data";
 import { getActiveVendor } from "@/lib/vendor";
 import {
-  Badge,
   Card,
   Field,
+  TierBadge,
   btnCls,
   btnDangerCls,
   inputCls,
@@ -51,7 +51,7 @@ export default async function TiersPage({
             className="rounded-xl border border-slate-200 bg-white shadow-sm"
           >
             <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <Badge value={t.name} />
+              <TierBadge tier={t.name} tiers={ladder} />
               <span className="text-xs text-slate-400">rank {t.rank}</span>
               <div className="ml-auto flex items-center gap-1">
                 <ReorderButton id={t.id} dir="up" disabled={i === 0} />
