@@ -3,6 +3,7 @@ import { getActiveVendor } from "@/lib/vendor";
 import { Card, Empty, PartnerLink } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Activity" };
 
 const KIND_LABEL: Record<ActivityEvent["kind"], string> = {
   engagement: "Engagement",

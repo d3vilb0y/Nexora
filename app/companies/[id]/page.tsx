@@ -6,6 +6,17 @@ import { Badge, Card, Empty, PartnerLink } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  return {
+    title: getCompanyDetail(Number(id))?.company.name ?? "Company not found",
+  };
+}
+
 export default async function CompanyPage({
   params,
 }: {

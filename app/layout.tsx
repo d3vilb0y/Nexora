@@ -3,28 +3,19 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { getActiveVendorId, listVendors } from "@/lib/vendor";
 import { VendorSwitcher } from "@/components/vendor-switcher";
+import { MainNav } from "@/components/main-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { THEME_COOKIE, resolveTheme } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nexora Partner CRM",
+  title: {
+    default: "Nexora Partner CRM",
+    template: "%s · Nexora CRM",
+  },
   description:
     "Track partners, personnel, certifications, engagement and partner health.",
 };
-
-const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/activity", label: "Activity" },
-  { href: "/log", label: "Log" },
-  { href: "/partners", label: "Partners" },
-  { href: "/companies", label: "Companies" },
-  { href: "/deals", label: "Deals" },
-  { href: "/people", label: "People" },
-  { href: "/certifications", label: "Certifications" },
-  { href: "/tiers", label: "Tiers" },
-  { href: "/admin", label: "Admin" },
-];
 
 export default async function RootLayout({
   children,
@@ -58,17 +49,7 @@ export default async function RootLayout({
                 className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-500 focus:outline-none"
               />
             </form>
-            <nav className="-mx-1 flex gap-1 overflow-x-auto sm:ml-auto">
-              {NAV.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+            <MainNav />
             <ThemeToggle initial={theme} />
           </div>
         </header>

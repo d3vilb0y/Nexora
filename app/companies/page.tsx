@@ -4,6 +4,7 @@ import { formatMoney } from "@/lib/health";
 import { Card, Empty } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Companies" };
 
 export default async function CompaniesPage() {
   const companies = listCompanies();
