@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import {
   createVendor,
   deleteVendor,
@@ -26,6 +27,7 @@ export default async function AdminPage({
 }: {
   searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
+  await requirePermission("vendors.manage");
   const { error, notice } = await searchParams;
   const vendors = listVendorsWithStats();
   const activeId = await getActiveVendorId();

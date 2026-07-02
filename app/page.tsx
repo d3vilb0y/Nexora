@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import Link from "next/link";
 import { getDashboard, listOpenDeals } from "@/lib/data";
 import { getActiveVendorId } from "@/lib/vendor";
@@ -8,6 +9,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
+  await requirePermission("dashboard.view");
   const vendorId = await getActiveVendorId();
   const data = getDashboard(vendorId);
   const openDeals = listOpenDeals(vendorId);

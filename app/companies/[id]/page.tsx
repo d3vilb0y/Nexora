@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompanyDetail } from "@/lib/data";
@@ -22,6 +23,7 @@ export default async function CompanyPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requirePermission("partners.view");
   const { id } = await params;
   const detail = getCompanyDetail(Number(id));
   if (!detail) notFound();

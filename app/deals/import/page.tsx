@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import Link from "next/link";
 import { importDealsFromCsv, importDealsFromSalesforceApi } from "@/lib/actions";
 import { salesforceAuthMode } from "@/lib/deal-import";
@@ -22,6 +23,7 @@ export default async function ImportPage({
     error?: string;
   }>;
 }) {
+  await requirePermission("deals.import");
   const params = await searchParams;
   const authMode = salesforceAuthMode();
   const apiReady = authMode !== "none";

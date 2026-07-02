@@ -1,3 +1,4 @@
+import { hasPermission, requirePermission } from "@/lib/auth";
 import { listPartners, listPeople } from "@/lib/data";
 import { getActiveVendorId } from "@/lib/vendor";
 import { PERSON_ROLES } from "@/lib/types";
@@ -7,6 +8,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "People" };
 
 export default async function PeoplePage() {
+  const session = await requirePermission("people.view");
+  const canExport = hasPermission(session, "contacts.export");
   const vendorId = await getActiveVendorId();
   const people = listPeople(vendorId);
   const partners = listPartners(vendorId);
@@ -17,6 +20,7 @@ export default async function PeoplePage() {
     <div className="space-y-6">
       <h1 className="text-xl font-bold">People</h1>
 
+      {canExport && (
       <Card title="Export contacts">
         <form
           action="/api/export/contacts"
@@ -72,6 +76,7 @@ export default async function PeoplePage() {
           </div>
         </form>
       </Card>
+      )}
 
       <Card title={`Active contacts (${active.length})`}>
         {active.length === 0 ? (

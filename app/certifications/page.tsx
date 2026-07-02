@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import { listCertifications } from "@/lib/data";
 import { getActiveVendor } from "@/lib/vendor";
 import { Badge, Card, CertExpiryBadge, Empty, PartnerLink } from "@/components/ui";
@@ -6,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Certifications" };
 
 export default async function CertificationsPage() {
+  await requirePermission("people.view");
   const vendor = await getActiveVendor();
   const certs = listCertifications(vendor.id);
 

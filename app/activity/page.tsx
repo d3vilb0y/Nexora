@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import { listActivity, type ActivityEvent } from "@/lib/data";
 import { getActiveVendor } from "@/lib/vendor";
 import { Card, Empty, PartnerLink } from "@/components/ui";
@@ -22,6 +23,7 @@ const KIND_COLOR: Record<ActivityEvent["kind"], string> = {
 };
 
 export default async function ActivityPage() {
+  await requirePermission("dashboard.view");
   const vendor = await getActiveVendor();
   const events = listActivity(vendor.id);
 

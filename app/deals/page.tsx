@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import Link from "next/link";
 import { createDeal, deleteDeal, updateDealStage } from "@/lib/actions";
 import { listDeals, listLogTargets } from "@/lib/data";
@@ -19,6 +20,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Deals" };
 
 export default async function DealsPage() {
+  await requirePermission("deals.view");
   const vendorId = await getActiveVendorId();
   const deals = listDeals(vendorId);
   const partners = listLogTargets(vendorId);

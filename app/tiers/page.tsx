@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import { createTier, deleteTier, moveTier, updateTier } from "@/lib/actions";
 import { listTiers } from "@/lib/data";
 import { getActiveVendor } from "@/lib/vendor";
@@ -18,6 +19,7 @@ export default async function TiersPage({
 }: {
   searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
+  await requirePermission("tiers.view");
   const { error, notice } = await searchParams;
   const vendor = await getActiveVendor();
   // listTiers is ascending by rank; show the ladder best-first (highest rank on top).

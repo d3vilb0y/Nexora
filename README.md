@@ -64,6 +64,34 @@ npm run seed   # optional: load demo data (wipes existing data)
 npm run dev    # http://localhost:3000
 ```
 
+## Authentication & access control
+
+Sign-in is **OIDC single sign-on** (any spec-compliant IdP: Entra ID, Okta,
+Keycloak, Auth0, Google, …) with **role-based access control** managed in the
+GUI under **Admin → Access**: roles bundle granular permissions (view/manage
+per area, deal import, contact export, vendor & access administration) and are
+assigned per user. Users appear after their first sign-in, or can be
+pre-provisioned by email. Pages, server actions **and** API routes all enforce
+the same permissions; the contacts-export API returns 401/403 accordingly.
+
+Configure via environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `OIDC_ISSUER` | Issuer URL, e.g. `https://login.example.com/realms/acme` |
+| `OIDC_CLIENT_ID` | Client id registered at the IdP |
+| `OIDC_CLIENT_SECRET` | Client secret (omit for public clients — PKCE is always used) |
+| `OIDC_SCOPES` | Optional, defaults to `openid profile email` |
+| `NEXORA_APP_URL` | Public base URL; redirect URI is `<APP_URL>/api/auth/callback` |
+| `NEXORA_ADMIN_EMAIL` | Bootstrap admin: this email gets the built-in Admin role on boot |
+| `NEXORA_AUTH_DISABLED` | `1` = skip auth entirely (local development only) |
+
+Register the redirect URI `https://your-host/api/auth/callback` (and, for
+RP-initiated logout, the post-logout URI `https://your-host/login`) at the IdP.
+The IdP must release the `email` claim. The built-in **Admin** role always
+grants every permission and can't be edited; safety rails prevent deleting or
+demoting the last account that can manage access.
+
 ## Production
 
 ```bash

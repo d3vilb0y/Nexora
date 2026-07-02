@@ -1,9 +1,17 @@
 import type { NextRequest } from "next/server";
+import { checkApiPermission } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
 import { listContactsForExport } from "@/lib/data";
 import { getActiveVendorId } from "@/lib/vendor";
 
 export async function GET(request: NextRequest) {
+  const auth = await checkApiPermission("contacts.export");
+  if ("status" in auth) {
+    return Response.json(
+      { error: auth.status === 401 ? "Not signed in." : "Missing permission: contacts.export" },
+      { status: auth.status }
+    );
+  }
   const params = request.nextUrl.searchParams;
   const partnerIds = params
     .getAll("partner")

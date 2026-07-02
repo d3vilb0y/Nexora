@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { deletePartner, updatePartner } from "@/lib/actions";
@@ -59,6 +60,7 @@ export default async function PartnerPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ tab?: string }>;
 }) {
+  await requirePermission("partners.view");
   const { id } = await params;
   const { tab } = await searchParams;
   const detail = getPartnerDetail(Number(id));
