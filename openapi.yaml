@@ -1,0 +1,249 @@
+openapi: 3.1.0
+info:
+  title: Nexora Partner CRM API
+  version: 1.0.0
+  description: |
+    HTTP API of Nexora Partner CRM.
+
+    ### Authentication
+    All data endpoints require a signed-in session. Sign-in is OIDC
+    (Authorization Code + PKCE): a browser is sent through
+    `/api/auth/login` → identity provider → `/api/auth/callback`, which sets
+    the `nexora_session` cookie (httpOnly, SameSite=Lax, 7-day TTL). Requests
+    without a valid session receive `401`; sessions lacking the required
+    permission receive `403`.
+
+    ### Authorization (RBAC)
+    Every endpoint documents the permission it requires via the
+    `x-required-permission` extension. Permissions are bundled into roles and
+    assigned to users in the GUI under **Admin → Access**.
+
+    Server Actions (form mutations used by the GUI) are not part of this
+    spec — they are an internal React protocol, guarded by the same
+    permission layer.
+  license:
+    name: Private
+servers:
+  - url: "{appUrl}"
+    variables:
+      appUrl:
+        default: http://localhost:3000
+        description: Public base URL of the deployment (NEXORA_APP_URL).
+
+tags:
+  - name: auth
+    description: OIDC sign-in/sign-out flow (browser redirects, not JSON).
+  - name: export
+    description: Data exports.
+  - name: meta
+    description: API metadata.
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: nexora_session
+      description: >-
+        Opaque session token minted by /api/auth/callback. Only its SHA-256
+        hash is stored server-side; sessions expire after 7 days or on
+        sign-out.
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          examples: ["Not signed in.", "Missing permission: contacts.export"]
+  responses:
+    Unauthorized:
+      description: No valid session cookie.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Signed in, but the session's roles lack the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+security:
+  - sessionCookie: []
+
+paths:
+  /api/auth/login:
+    get:
+      tags: [auth]
+      operationId: startLogin
+      summary: Start OIDC sign-in
+      description: >-
+        Begins the Authorization Code + PKCE flow: stores the PKCE
+        verifier/state/nonce in a short-lived transaction cookie and redirects
+        to the identity provider's authorization endpoint.
+      security: []
+      parameters:
+        - name: next
+          in: query
+          required: false
+          description: >-
+            Internal path to land on after sign-in. Must start with `/`
+            (single slash); anything else falls back to `/`.
+          schema:
+            type: string
+            default: /
+      responses:
+        "307":
+          description: >-
+            Redirect to the IdP authorization endpoint — or to
+            `/login?error=…` when OIDC isn't configured or discovery fails.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+            Set-Cookie:
+              description: "`nexora_oidc` transaction cookie (10-minute TTL)."
+              schema:
+                type: string
+
+  /api/auth/callback:
+    get:
+      tags: [auth]
+      operationId: completeLogin
+      summary: OIDC redirect URI
+      description: >-
+        Completes the flow: validates state/nonce/PKCE, exchanges the code,
+        upserts the user (matched by OIDC subject, then by pre-provisioned
+        email) and mints the session. Register this URL at the IdP.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "307":
+          description: >-
+            Redirect to the requested internal path on success, or to
+            `/login?error=expired|failed|no-email` on validation failure.
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              description: "`nexora_session` on success; clears `nexora_oidc`."
+              schema:
+                type: string
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Sign out
+      description: >-
+        Destroys the local session (the token is revoked server-side), then
+        redirects to the IdP's end-session endpoint when available
+        (RP-initiated logout with `id_token_hint`), otherwise to `/login`.
+      responses:
+        "303":
+          description: Redirect to the IdP end-session endpoint or `/login`.
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              description: Clears `nexora_session`.
+              schema:
+                type: string
+
+  /api/export/contacts:
+    get:
+      tags: [export]
+      operationId: exportContacts
+      summary: Export contacts as CSV or an email list
+      description: >-
+        Exports people from the active vendor's landscape (the vendor in focus
+        is taken from the `nexora_vendor` cookie, defaulting to the first
+        vendor). Requires the `contacts.export` permission.
+      x-required-permission: contacts.export
+      parameters:
+        - name: partner
+          in: query
+          required: false
+          description: Partner ids to include. Repeatable; none = all partners.
+          schema:
+            type: array
+            items:
+              type: integer
+              minimum: 1
+          style: form
+          explode: true
+        - name: role
+          in: query
+          required: false
+          description: Filter by person role.
+          schema:
+            type: string
+            enum: [All, Sales, Technical, Management, Other]
+            default: All
+        - name: departed
+          in: query
+          required: false
+          description: Set to `1` to include departed people.
+          schema:
+            type: string
+            enum: ["1"]
+        - name: format
+          in: query
+          required: false
+          description: >-
+            `csv` = downloadable UTF-8 CSV (with BOM); `emails` = plain-text
+            `Name <email>` lines.
+          schema:
+            type: string
+            enum: [csv, emails]
+            default: csv
+      responses:
+        "200":
+          description: The export.
+          content:
+            text/csv:
+              schema:
+                type: string
+              example: |
+                Name,Role,Title,Email,Phone,Partner,Office,LinkedIn,Status
+                Anna Ek,Technical,Engineer,anna@partner.se,,Partner AB,,https://linkedin.com/in/anna,Active
+            text/plain:
+              schema:
+                type: string
+              example: |
+                Anna Ek <anna@partner.se>
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/openapi:
+    get:
+      tags: [meta]
+      operationId: getOpenApiSpec
+      summary: This OpenAPI 3.1 document
+      description: Requires any signed-in session.
+      responses:
+        "200":
+          description: The spec.
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
