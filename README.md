@@ -86,6 +86,11 @@ Configure via environment:
 | `NEXORA_ADMIN_EMAIL` | Bootstrap admin: this email gets the built-in Admin role on boot |
 | `NEXORA_AUTH_DISABLED` | `1` = skip auth entirely (local development only) |
 
+The HTTP API is described by an **OpenAPI 3.1 spec** at
+[`openapi.yaml`](./openapi.yaml), also served to signed-in users at
+`/api/openapi`. Each endpoint documents the permission it requires via the
+`x-required-permission` extension.
+
 Register the redirect URI `https://your-host/api/auth/callback` (and, for
 RP-initiated logout, the post-logout URI `https://your-host/login`) at the IdP.
 The IdP must release the `email` claim. The built-in **Admin** role always
