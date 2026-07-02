@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import Link from "next/link";
 import { search } from "@/lib/data";
 import { getActiveVendor } from "@/lib/vendor";
@@ -12,6 +13,7 @@ export default async function SearchPage({
 }: {
   searchParams: Promise<{ q?: string | string[] }>;
 }) {
+  await requirePermission("search.use");
   const vendor = await getActiveVendor();
   const raw = (await searchParams).q;
   const q = (Array.isArray(raw) ? raw[0] : raw)?.trim() ?? "";

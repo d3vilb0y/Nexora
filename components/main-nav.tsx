@@ -3,18 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/activity", label: "Activity" },
-  { href: "/log", label: "Log" },
-  { href: "/partners", label: "Partners" },
-  { href: "/companies", label: "Companies" },
-  { href: "/deals", label: "Deals" },
-  { href: "/people", label: "People" },
-  { href: "/certifications", label: "Certifications" },
-  { href: "/tiers", label: "Tiers" },
-  { href: "/admin", label: "Admin" },
-];
+export type NavItem = { href: string; label: string };
 
 function isActive(pathname: string, href: string) {
   return href === "/"
@@ -23,16 +12,21 @@ function isActive(pathname: string, href: string) {
 }
 
 /**
- * Primary navigation. Highlights the section the user is in (including detail
+ * Primary navigation. The layout passes only the items the signed-in user's
+ * permissions allow. Highlights the section the user is in (including detail
  * routes like /partners/123) so the current location is always obvious.
  */
-export function MainNav() {
+export function MainNav({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
+  // Longest matching href wins, so /admin/access doesn't also light up /admin.
+  const activeHref = items
+    .filter((i) => isActive(pathname, i.href))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
     <nav className="-mx-1 flex gap-1 overflow-x-auto sm:ml-auto">
-      {NAV.map((item) => {
-        const active = isActive(pathname, item.href);
+      {items.map((item) => {
+        const active = item.href === activeHref;
         return (
           <Link
             key={item.href}

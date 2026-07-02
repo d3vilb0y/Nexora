@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import { ALL_PERMISSIONS, PERMISSION_KEYS } from "./permissions";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "nexora.db");
@@ -262,6 +263,118 @@ function migrate(db: Database.Database) {
 
   migrateToMultiVendor(db, hasColumn);
   migrateToSharedPeople(db, hasColumn);
+  migrateAuth(db);
+}
+
+/**
+ * OIDC login + RBAC. Users are provisioned on first OIDC login (or ahead of
+ * time in the GUI); roles bundle permissions from the code-level catalog in
+ * lib/permissions.ts. The built-in Admin role holds the wildcard permission so
+ * it automatically covers permissions added in later releases.
+ */
+function migrateAuth(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sub TEXT UNIQUE,
+      email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_login_at TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS roles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '',
+      built_in INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      permission TEXT NOT NULL,
+      PRIMARY KEY (role_id, permission)
+    );
+
+    CREATE TABLE IF NOT EXISTS user_roles (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      PRIMARY KEY (user_id, role_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      id_token TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role_id);
+  `);
+
+  // The built-in Admin role always exists and always means "everything".
+  db.prepare(
+    "INSERT OR IGNORE INTO roles (name, description, built_in) VALUES ('Admin', 'Full access to everything, including user & role management.', 1)"
+  ).run();
+  const adminRoleId = (
+    db.prepare("SELECT id FROM roles WHERE name = 'Admin'").get() as {
+      id: number;
+    }
+  ).id;
+  db.prepare(
+    "INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES (?, ?)"
+  ).run(adminRoleId, ALL_PERMISSIONS);
+
+  // Starter roles, seeded only while Admin is alone — admins can reshape or
+  // delete them afterwards without them resurrecting on the next boot.
+  const roleCount = (
+    db.prepare("SELECT COUNT(*) AS c FROM roles").get() as { c: number }
+  ).c;
+  if (roleCount === 1) {
+    const insertRole = db.prepare(
+      "INSERT INTO roles (name, description) VALUES (?, ?)"
+    );
+    const insertPerm = db.prepare(
+      "INSERT INTO role_permissions (role_id, permission) VALUES (?, ?)"
+    );
+    const managerId = Number(
+      insertRole.run(
+        "Manager",
+        "Work with all CRM data; no vendor or access administration."
+      ).lastInsertRowid
+    );
+    for (const key of PERMISSION_KEYS) {
+      if (key !== "vendors.manage" && key !== "access.manage") {
+        insertPerm.run(managerId, key);
+      }
+    }
+    const viewerId = Number(
+      insertRole.run("Viewer", "Read-only access to the CRM.").lastInsertRowid
+    );
+    for (const key of PERMISSION_KEYS) {
+      if (key.endsWith(".view") || key === "search.use") {
+        insertPerm.run(viewerId, key);
+      }
+    }
+  }
+
+  // Bootstrap admin: pre-provision the user named by env so the very first
+  // OIDC login (matched by email) lands with the Admin role already attached.
+  const adminEmail = process.env.NEXORA_ADMIN_EMAIL?.trim();
+  if (adminEmail) {
+    db.prepare(
+      "INSERT OR IGNORE INTO users (email, name) VALUES (?, 'Bootstrap admin')"
+    ).run(adminEmail);
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ? COLLATE NOCASE")
+      .get(adminEmail) as { id: number };
+    db.prepare(
+      "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)"
+    ).run(user.id, adminRoleId);
+  }
 }
 
 /**

@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import { createPartner } from "@/lib/actions";
 import { listPartners, listTiers } from "@/lib/data";
 import { getActiveVendor } from "@/lib/vendor";
@@ -19,6 +20,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Partners" };
 
 export default async function PartnersPage() {
+  await requirePermission("partners.view");
   const vendor = await getActiveVendor();
   const partners = listPartners(vendor.id);
   const tiers = listTiers(vendor.id);

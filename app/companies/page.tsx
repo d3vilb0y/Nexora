@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import Link from "next/link";
 import { listCompanies } from "@/lib/data";
 import { formatMoney } from "@/lib/health";
@@ -7,6 +8,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Companies" };
 
 export default async function CompaniesPage() {
+  await requirePermission("partners.view");
   const companies = listCompanies();
 
   return (

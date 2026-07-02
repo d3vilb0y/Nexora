@@ -1,3 +1,4 @@
+import { requirePermission } from "@/lib/auth";
 import { listLogTargets, listRecentEngagements } from "@/lib/data";
 import { getActiveVendorId } from "@/lib/vendor";
 import { Badge, Card, Empty, PartnerLink } from "@/components/ui";
@@ -7,6 +8,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Log engagement" };
 
 export default async function LogPage() {
+  await requirePermission("engagements.manage");
   const vendorId = await getActiveVendorId();
   const targets = listLogTargets(vendorId);
   const recent = listRecentEngagements(vendorId, 25);

@@ -1,6 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import {
+  requirePermission,
+  requireUser,
+  someoneCanManageAccess,
+} from "./auth";
+import { isKnownPermission } from "./permissions";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ensureVendorTiers, getDb, resolveCompanyId } from "./db";
@@ -56,6 +62,7 @@ function safeReturnTo(path: string): string {
 
 /** Switch which vendor's partner landscape the whole CRM is scoped to. */
 export async function setActiveVendor(form: FormData) {
+  await requireUser();
   const id = num(form, "vendor_id");
   (await cookies()).set(VENDOR_COOKIE, String(id), {
     path: "/",
@@ -72,6 +79,7 @@ export async function setActiveVendor(form: FormData) {
 }
 
 export async function createVendor(form: FormData) {
+  await requirePermission("vendors.manage");
   const db = getDb();
   const id = Number(
     db
@@ -98,6 +106,7 @@ export async function createVendor(form: FormData) {
 }
 
 export async function updateVendor(form: FormData) {
+  await requirePermission("vendors.manage");
   getDb()
     .prepare(
       "UPDATE vendors SET name = ?, description = ?, cert_catalog = ?, teams_webhook_url = ?, status = ? WHERE id = ?"
@@ -122,6 +131,7 @@ function adminRedirect(params: Record<string, string>): never {
 
 /** Send a "connected" test card to the vendor's configured Teams channel. */
 export async function sendTeamsTest(form: FormData) {
+  await requirePermission("vendors.manage");
   const vendor = getVendor(num(form, "vendor_id"));
   if (!vendor) adminRedirect({ error: "Vendor not found." });
   if (!isTeamsConfigured(vendor)) {
@@ -142,6 +152,7 @@ export async function sendTeamsTest(form: FormData) {
 
 /** Push the current partner-health digest to the vendor's Teams channel. */
 export async function sendTeamsDigest(form: FormData) {
+  await requirePermission("vendors.manage");
   const vendor = getVendor(num(form, "vendor_id"));
   if (!vendor) adminRedirect({ error: "Vendor not found." });
   if (!isTeamsConfigured(vendor)) {
@@ -162,6 +173,7 @@ export async function sendTeamsDigest(form: FormData) {
 }
 
 export async function deleteVendor(form: FormData) {
+  await requirePermission("vendors.manage");
   const db = getDb();
   const id = num(form, "id");
   const total = (
@@ -184,6 +196,7 @@ export async function deleteVendor(form: FormData) {
 // --- Partners ---
 
 export async function createPartner(form: FormData) {
+  await requirePermission("partners.manage");
   const vendorId = await getActiveVendorId();
   const db = getDb();
   const name = reqStr(form, "name");
@@ -211,6 +224,7 @@ export async function createPartner(form: FormData) {
 }
 
 export async function updatePartner(form: FormData) {
+  await requirePermission("partners.manage");
   const id = num(form, "id");
   getDb()
     .prepare(
@@ -231,6 +245,7 @@ export async function updatePartner(form: FormData) {
 }
 
 export async function deletePartner(form: FormData) {
+  await requirePermission("partners.manage");
   const db = getDb();
   const id = num(form, "id");
   const partner = db
@@ -258,6 +273,7 @@ export async function deletePartner(form: FormData) {
 // --- Offices ---
 
 export async function createOffice(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -276,6 +292,7 @@ export async function createOffice(form: FormData) {
 }
 
 export async function deleteOffice(form: FormData) {
+  await requirePermission("partners.manage");
   getDb().prepare("DELETE FROM offices WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -283,6 +300,7 @@ export async function deleteOffice(form: FormData) {
 // --- People ---
 
 export async function createPerson(form: FormData) {
+  await requirePermission("people.manage");
   const db = getDb();
   const partnerId = num(form, "partner_id");
   const officeId = num(form, "office_id");
@@ -316,6 +334,7 @@ export async function createPerson(form: FormData) {
 }
 
 export async function setPersonOffice(form: FormData) {
+  await requirePermission("people.manage");
   const officeId = num(form, "office_id");
   getDb()
     .prepare("UPDATE people SET office_id = ? WHERE id = ?")
@@ -324,6 +343,7 @@ export async function setPersonOffice(form: FormData) {
 }
 
 export async function markPersonDeparted(form: FormData) {
+  await requirePermission("people.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -338,6 +358,7 @@ export async function markPersonDeparted(form: FormData) {
 }
 
 export async function reactivatePerson(form: FormData) {
+  await requirePermission("people.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -348,6 +369,7 @@ export async function reactivatePerson(form: FormData) {
 }
 
 export async function deletePerson(form: FormData) {
+  await requirePermission("people.manage");
   const partnerId = num(form, "partner_id");
   getDb().prepare("DELETE FROM people WHERE id = ?").run(num(form, "id"));
   revalidatePartner(partnerId);
@@ -356,6 +378,7 @@ export async function deletePerson(form: FormData) {
 // --- Certifications ---
 
 export async function createCertification(form: FormData) {
+  await requirePermission("people.manage");
   const db = getDb();
   const partnerId = num(form, "partner_id");
   // The cert belongs to the program of whichever vendor we're adding it under,
@@ -381,6 +404,7 @@ export async function createCertification(form: FormData) {
 }
 
 export async function deleteCertification(form: FormData) {
+  await requirePermission("people.manage");
   getDb()
     .prepare("DELETE FROM certifications WHERE id = ?")
     .run(num(form, "id"));
@@ -390,6 +414,7 @@ export async function deleteCertification(form: FormData) {
 // --- Engagements ---
 
 export async function createEngagement(form: FormData) {
+  await requirePermission("engagements.manage");
   const partnerIds = form
     .getAll("partner_id")
     .map(Number)
@@ -432,6 +457,7 @@ export async function createEngagement(form: FormData) {
 }
 
 export async function deleteEngagement(form: FormData) {
+  await requirePermission("engagements.manage");
   getDb().prepare("DELETE FROM engagements WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -439,6 +465,7 @@ export async function deleteEngagement(form: FormData) {
 // --- Deals ---
 
 export async function createDeal(form: FormData) {
+  await requirePermission("deals.manage");
   const partnerId = num(form, "partner_id");
   if (!partnerId) throw new Error("Pick a partner first");
   getDb()
@@ -460,6 +487,7 @@ export async function createDeal(form: FormData) {
 }
 
 export async function updateDealStage(form: FormData) {
+  await requirePermission("deals.manage");
   const stage = reqStr(form, "stage");
   const closedDate =
     stage === "Won" || stage === "Lost"
@@ -472,6 +500,7 @@ export async function updateDealStage(form: FormData) {
 }
 
 export async function deleteDeal(form: FormData) {
+  await requirePermission("deals.manage");
   getDb().prepare("DELETE FROM deals WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -496,6 +525,7 @@ function redirectWithError(message: string): never {
 }
 
 export async function importDealsFromCsv(form: FormData) {
+  await requirePermission("deals.import");
   const vendorId = await getActiveVendorId();
   const file = form.get("file");
   if (!(file instanceof File) || file.size === 0) {
@@ -507,6 +537,7 @@ export async function importDealsFromCsv(form: FormData) {
 }
 
 export async function importDealsFromSalesforceApi() {
+  await requirePermission("deals.import");
   const vendorId = await getActiveVendorId();
   let summary: ImportSummary;
   try {
@@ -520,6 +551,7 @@ export async function importDealsFromSalesforceApi() {
 // --- MDF ---
 
 export async function createMdfEntry(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -537,6 +569,7 @@ export async function createMdfEntry(form: FormData) {
 }
 
 export async function deleteMdfEntry(form: FormData) {
+  await requirePermission("partners.manage");
   getDb().prepare("DELETE FROM mdf_entries WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -544,6 +577,7 @@ export async function deleteMdfEntry(form: FormData) {
 // --- Licenses ---
 
 export async function createLicense(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -563,6 +597,7 @@ export async function createLicense(form: FormData) {
 }
 
 export async function deleteLicense(form: FormData) {
+  await requirePermission("partners.manage");
   getDb().prepare("DELETE FROM licenses WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -570,6 +605,7 @@ export async function deleteLicense(form: FormData) {
 // --- Business goals ---
 
 export async function createGoal(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -588,6 +624,7 @@ export async function createGoal(form: FormData) {
 }
 
 export async function updateGoalProgress(form: FormData) {
+  await requirePermission("partners.manage");
   getDb()
     .prepare("UPDATE business_goals SET progress_pct = ? WHERE id = ?")
     .run(Math.min(100, Math.max(0, num(form, "progress_pct"))), num(form, "id"));
@@ -595,6 +632,7 @@ export async function updateGoalProgress(form: FormData) {
 }
 
 export async function deleteGoal(form: FormData) {
+  await requirePermission("partners.manage");
   getDb()
     .prepare("DELETE FROM business_goals WHERE id = ?")
     .run(num(form, "id"));
@@ -604,6 +642,7 @@ export async function deleteGoal(form: FormData) {
 // --- Competitors ---
 
 export async function createCompetitor(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare("INSERT INTO competitors (partner_id, vendor, notes) VALUES (?, ?, ?)")
@@ -612,6 +651,7 @@ export async function createCompetitor(form: FormData) {
 }
 
 export async function deleteCompetitor(form: FormData) {
+  await requirePermission("partners.manage");
   getDb().prepare("DELETE FROM competitors WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -619,6 +659,7 @@ export async function deleteCompetitor(form: FormData) {
 // --- Needs ---
 
 export async function createNeed(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -634,6 +675,7 @@ export async function createNeed(form: FormData) {
 }
 
 export async function updateNeedStatus(form: FormData) {
+  await requirePermission("partners.manage");
   getDb()
     .prepare("UPDATE needs SET status = ? WHERE id = ?")
     .run(reqStr(form, "status"), num(form, "id"));
@@ -641,6 +683,7 @@ export async function updateNeedStatus(form: FormData) {
 }
 
 export async function deleteNeed(form: FormData) {
+  await requirePermission("partners.manage");
   getDb().prepare("DELETE FROM needs WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -648,6 +691,7 @@ export async function deleteNeed(form: FormData) {
 // --- Problems ---
 
 export async function createProblem(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -663,6 +707,7 @@ export async function createProblem(form: FormData) {
 }
 
 export async function updateProblemStatus(form: FormData) {
+  await requirePermission("partners.manage");
   getDb()
     .prepare("UPDATE problems SET status = ? WHERE id = ?")
     .run(reqStr(form, "status"), num(form, "id"));
@@ -670,6 +715,7 @@ export async function updateProblemStatus(form: FormData) {
 }
 
 export async function deleteProblem(form: FormData) {
+  await requirePermission("partners.manage");
   getDb().prepare("DELETE FROM problems WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
 }
@@ -677,6 +723,7 @@ export async function deleteProblem(form: FormData) {
 // --- Follow-ups (next actions) ---
 
 export async function createFollowUp(form: FormData) {
+  await requirePermission("partners.manage");
   const partnerId = num(form, "partner_id");
   getDb()
     .prepare(
@@ -688,6 +735,7 @@ export async function createFollowUp(form: FormData) {
 }
 
 export async function toggleFollowUp(form: FormData) {
+  await requirePermission("partners.manage");
   getDb()
     .prepare("UPDATE follow_ups SET done = CASE done WHEN 1 THEN 0 ELSE 1 END WHERE id = ?")
     .run(num(form, "id"));
@@ -696,6 +744,7 @@ export async function toggleFollowUp(form: FormData) {
 }
 
 export async function deleteFollowUp(form: FormData) {
+  await requirePermission("partners.manage");
   getDb().prepare("DELETE FROM follow_ups WHERE id = ?").run(num(form, "id"));
   revalidatePartner(num(form, "partner_id"));
   revalidatePath("/activity");
@@ -718,6 +767,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 /** Add a new program tier (level) to the active vendor's ladder, at the top. */
 export async function createTier(form: FormData) {
+  await requirePermission("tiers.manage");
   const vendorId = await getActiveVendorId();
   const name = reqStr(form, "name");
   const db = getDb();
@@ -747,6 +797,7 @@ export async function createTier(form: FormData) {
 
 /** Rename a tier and/or edit its requirements; renames follow through to partners. */
 export async function updateTier(form: FormData) {
+  await requirePermission("tiers.manage");
   const vendorId = await getActiveVendorId();
   const id = num(form, "id");
   const name = reqStr(form, "name");
@@ -784,6 +835,7 @@ export async function updateTier(form: FormData) {
 
 /** Move a tier one step up (higher rank) or down its vendor's ladder. */
 export async function moveTier(form: FormData) {
+  await requirePermission("tiers.manage");
   const vendorId = await getActiveVendorId();
   const id = num(form, "id");
   const up = str(form, "dir") === "up";
@@ -811,6 +863,7 @@ export async function moveTier(form: FormData) {
 
 /** Remove a tier, moving any partners on it down to the nearest remaining tier. */
 export async function deleteTier(form: FormData) {
+  await requirePermission("tiers.manage");
   const vendorId = await getActiveVendorId();
   const id = num(form, "id");
   const db = getDb();
@@ -855,4 +908,172 @@ export async function deleteTier(form: FormData) {
         }
       : { notice: `Deleted the “${tier.name}” tier.` }
   );
+}
+
+// --- Access management (RBAC) ---
+
+function accessRedirect(params: Record<string, string>): never {
+  revalidatePath("/admin/access");
+  redirect(`/admin/access?${new URLSearchParams(params).toString()}`);
+}
+
+/**
+ * Run an access mutation inside a transaction and roll it back if it would
+ * leave nobody able to manage access — the classic admin-lockout guard.
+ */
+function withLockoutGuard(mutate: () => void): boolean {
+  const db = getDb();
+  try {
+    db.transaction(() => {
+      mutate();
+      if (!someoneCanManageAccess()) {
+        throw new Error("lockout");
+      }
+    })();
+    return true;
+  } catch (err) {
+    if (err instanceof Error && err.message === "lockout") return false;
+    throw err;
+  }
+}
+
+export async function createRole(form: FormData) {
+  await requirePermission("access.manage");
+  const name = reqStr(form, "name");
+  try {
+    getDb()
+      .prepare("INSERT INTO roles (name, description) VALUES (?, ?)")
+      .run(name, str(form, "description"));
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("UNIQUE")) {
+      accessRedirect({ error: `A role named “${name}” already exists.` });
+    }
+    throw err;
+  }
+  accessRedirect({ notice: `Role “${name}” created — now pick its permissions.` });
+}
+
+/** Rename a role and replace its permission set from the submitted checkboxes. */
+export async function updateRole(form: FormData) {
+  await requirePermission("access.manage");
+  const id = num(form, "id");
+  const db = getDb();
+  const role = db
+    .prepare("SELECT id, name, built_in FROM roles WHERE id = ?")
+    .get(id) as { id: number; name: string; built_in: number } | undefined;
+  if (!role) accessRedirect({ error: "That role no longer exists." });
+  if (role.built_in) {
+    accessRedirect({ error: "The built-in Admin role can't be edited — it always grants everything." });
+  }
+  const name = reqStr(form, "name");
+  const perms = (form.getAll("perm") as string[]).filter(isKnownPermission);
+  const ok = withLockoutGuard(() => {
+    db.prepare("UPDATE roles SET name = ?, description = ? WHERE id = ?").run(
+      name,
+      str(form, "description"),
+      id
+    );
+    db.prepare("DELETE FROM role_permissions WHERE role_id = ?").run(id);
+    const insert = db.prepare(
+      "INSERT INTO role_permissions (role_id, permission) VALUES (?, ?)"
+    );
+    for (const p of perms) insert.run(id, p);
+  });
+  if (!ok) {
+    accessRedirect({
+      error: "Change rejected — it would leave no one able to manage access.",
+    });
+  }
+  accessRedirect({ notice: `Role “${name}” saved.` });
+}
+
+export async function deleteRole(form: FormData) {
+  await requirePermission("access.manage");
+  const id = num(form, "id");
+  const db = getDb();
+  const role = db
+    .prepare("SELECT name, built_in FROM roles WHERE id = ?")
+    .get(id) as { name: string; built_in: number } | undefined;
+  if (!role) accessRedirect({ error: "That role no longer exists." });
+  if (role.built_in) {
+    accessRedirect({ error: "The built-in Admin role can't be deleted." });
+  }
+  const ok = withLockoutGuard(() => {
+    db.prepare("DELETE FROM roles WHERE id = ?").run(id);
+  });
+  if (!ok) {
+    accessRedirect({
+      error: "Not deleted — that role is the last thing keeping access manageable.",
+    });
+  }
+  accessRedirect({ notice: `Role “${role.name}” deleted.` });
+}
+
+/** Replace a user's role set from the submitted checkboxes. */
+export async function updateUserRoles(form: FormData) {
+  await requirePermission("access.manage");
+  const userId = num(form, "user_id");
+  const roleIds = (form.getAll("role") as string[])
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
+  const db = getDb();
+  const user = db
+    .prepare("SELECT email FROM users WHERE id = ?")
+    .get(userId) as { email: string } | undefined;
+  if (!user) accessRedirect({ error: "That user no longer exists." });
+  const ok = withLockoutGuard(() => {
+    db.prepare("DELETE FROM user_roles WHERE user_id = ?").run(userId);
+    const insert = db.prepare(
+      "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)"
+    );
+    for (const rid of roleIds) insert.run(userId, rid);
+  });
+  if (!ok) {
+    accessRedirect({
+      error: "Change rejected — it would leave no one able to manage access.",
+    });
+  }
+  accessRedirect({ notice: `Roles updated for ${user.email}.` });
+}
+
+/** Pre-provision a user by email so roles are in place before their first login. */
+export async function inviteUser(form: FormData) {
+  await requirePermission("access.manage");
+  const email = reqStr(form, "email");
+  try {
+    getDb()
+      .prepare("INSERT INTO users (email, name) VALUES (?, '')")
+      .run(email);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("UNIQUE")) {
+      accessRedirect({ error: `${email} already has an account.` });
+    }
+    throw err;
+  }
+  accessRedirect({
+    notice: `${email} pre-provisioned — assign roles below; they take effect on first sign-in.`,
+  });
+}
+
+export async function deleteUser(form: FormData) {
+  const session = await requirePermission("access.manage");
+  const id = num(form, "id");
+  if (id === session.user.id) {
+    accessRedirect({ error: "You can't delete your own account while signed in." });
+  }
+  const db = getDb();
+  const user = db
+    .prepare("SELECT email FROM users WHERE id = ?")
+    .get(id) as { email: string } | undefined;
+  if (!user) accessRedirect({ error: "That user no longer exists." });
+  const ok = withLockoutGuard(() => {
+    // Cascades to their sessions and role assignments.
+    db.prepare("DELETE FROM users WHERE id = ?").run(id);
+  });
+  if (!ok) {
+    accessRedirect({
+      error: "Not deleted — that user is the last one able to manage access.",
+    });
+  }
+  accessRedirect({ notice: `${user.email} removed. Their sessions are revoked.` });
 }
